@@ -876,27 +876,25 @@ export default function App() {
           </div>
           <div ref={chatScrollRef} className="px-8 space-y-6 pb-4">
             {chatMessages.length === 0 && <p className="text-[12.5px] text-text-muted py-2.5 px-1 font-medium leading-relaxed">{orKey ? "Tap a suggestion or quick action, or just ask anything about the meeting." : "Chat with the system."}</p>}
-            {chatMessages.map(m => (
-              <div key={m.id} className={`animate-fade-in flex flex-col ${m.role === "user" ? "items-end" : "items-start"}`}>
-                <div className={`text-[9.5px] font-bold mb-1.5 px-1 tracking-wide uppercase text-text-muted`}>{m.role === "user" ? "You" : "AI assistant"}</div>
-                {m.role === "user" ? (
-                  <div className="md-invert max-w-[88%] px-6 py-4 rounded-2xl rounded-br-md bg-accent text-white shadow-[0_4px_16px_-6px_var(--color-accent-glow)]">
-                    <Markdown text={m.text} />
-                  </div>
-                ) : (
-                  <div className="max-w-[92%] px-6 py-5 rounded-2xl rounded-bl-md bg-surface-1 border border-border text-text-primary shadow-[0_2px_14px_-8px_rgba(14,21,37,0.18)]">
-                    <Markdown text={m.text} />
-                  </div>
-                )}
-              </div>
-            ))}
+            {chatMessages.map(m => m.role === "user"
+              ? (
+                <div key={m.id} className="animate-fade-in flex justify-end">
+                  <div className="bubble-user md-invert max-w-[88%] px-6 py-3.5"><Markdown text={m.text} /></div>
+                </div>
+              )
+              : (
+                <div key={m.id} className="animate-fade-in flex items-start gap-3">
+                  <span className="chat-avatar !w-8 !h-8"><Sparkles size={15} /></span>
+                  <div className="bubble-agent max-w-[86%] px-6 py-4"><Markdown text={m.text} /></div>
+                </div>
+              ))}
             {aiLoading && (
-              <div className="flex flex-col items-start animate-fade-in">
-                <div className="text-[9.5px] font-bold mb-1.5 px-1 tracking-wide uppercase text-text-muted">AI assistant</div>
-                <div className="px-6 py-5 rounded-2xl rounded-bl-md bg-surface-1 border border-border inline-flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
-                  <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse [animation-delay:150ms]" />
-                  <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse [animation-delay:300ms]" />
+              <div className="flex items-start gap-3 animate-fade-in">
+                <span className="chat-avatar !w-8 !h-8"><Sparkles size={15} /></span>
+                <div className="bubble-agent px-6 py-5 inline-flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#1668e3] animate-pulse" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#1668e3] animate-pulse [animation-delay:150ms]" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#1668e3] animate-pulse [animation-delay:300ms]" />
                 </div>
               </div>
             )}
@@ -917,6 +915,69 @@ export default function App() {
             placeholder={orKey ? "Ask the AI anything..." : "Type a message..."}
             className="flex-1 bg-transparent text-[13px] text-text-primary placeholder-text-muted outline-none font-medium" />
           <button onClick={handleChat} disabled={aiLoading} className="btn btn-primary btn-icon-sm shrink-0"><Send size={15} /></button>
+        </div>
+      </div>
+    </div>
+  );
+
+  // ── Dedicated AI chat view (viewMode === "chat") ───────────────
+  // Centered reading column matching the chat design: header, seeded
+  // greeting, agent/user bubbles, rounded composer with a round send.
+  const agentBubble = (text: string, key: string, animate = true) => (
+    <div key={key} className={`${animate ? "animate-fade-in " : ""}flex items-start gap-3.5`}>
+      <span className="chat-avatar"><Sparkles size={17} /></span>
+      <div className="bubble-agent px-6 py-4 max-w-[80%]"><Markdown text={text} /></div>
+    </div>
+  );
+  const chatThread = (
+    <>
+      {agentBubble("Hi — I'm following this call live. Ask me anything, or tap a suggestion to dig in.", "greeting", false)}
+      {chatMessages.map(m => m.role === "user"
+        ? (
+          <div key={m.id} className="animate-fade-in flex justify-end">
+            <div className="bubble-user md-invert px-6 py-3.5 max-w-[80%]"><Markdown text={m.text} /></div>
+          </div>
+        )
+        : agentBubble(m.text, m.id))}
+      {aiLoading && (
+        <div className="animate-fade-in flex items-start gap-3.5">
+          <span className="chat-avatar"><Sparkles size={17} /></span>
+          <div className="bubble-agent px-6 py-5 inline-flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#1668e3] animate-pulse" />
+            <span className="w-1.5 h-1.5 rounded-full bg-[#1668e3] animate-pulse [animation-delay:150ms]" />
+            <span className="w-1.5 h-1.5 rounded-full bg-[#1668e3] animate-pulse [animation-delay:300ms]" />
+          </div>
+        </div>
+      )}
+    </>
+  );
+  const chatComposer = (
+    <div className="chat-composer flex items-center gap-3 pl-6 pr-2.5 py-2.5">
+      <input value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => e.key === "Enter" && handleChat()}
+        placeholder={orKey ? "Ask the AI anything…" : "Type a message…"}
+        className="flex-1 bg-transparent text-[14px] text-text-primary placeholder-text-muted outline-none font-medium min-w-0" />
+      <button onClick={handleChat} disabled={aiLoading || !chatInput.trim()} className="chat-send" title="Send"><Send size={17} /></button>
+    </div>
+  );
+  const chatView = (
+    <div className="flex-1 flex justify-center min-h-0">
+      <div className="flex flex-col w-full max-w-3xl min-h-0 px-6">
+        {/* Header */}
+        <div className="flex items-center gap-4 px-2 pt-12 pb-9 shrink-0">
+          <span className="chat-avatar !w-11 !h-11 !rounded-2xl"><Sparkles size={20} /></span>
+          <div>
+            <h2 className="text-[18px] font-bold text-text-primary tracking-tight leading-none">AI assistant</h2>
+            <p className="text-[13px] text-text-muted font-medium mt-2">Ask anything about this meeting</p>
+          </div>
+        </div>
+        {/* Thread */}
+        <div ref={chatScrollRef} className="flex-1 overflow-y-auto px-2 pb-8 space-y-7">
+          {chatThread}
+        </div>
+        {/* Composer */}
+        <div className="px-2 pt-3 pb-12 shrink-0">
+          {!orKey && <span className="offline-note mb-3"><span className="offline-note-dot" />AI offline — set OPENROUTER_API</span>}
+          {chatComposer}
         </div>
       </div>
     </div>
@@ -1038,13 +1099,9 @@ export default function App() {
         {/* === MAIN WORKSPACE === */}
         <div className="flex-1 flex min-h-0 pb-8 lg:pb-10">
           <div className="flex-1 flex min-h-0 rounded-3xl border border-border bg-surface-1/60 backdrop-blur-sm overflow-hidden shadow-[0_24px_60px_-32px_rgba(14,21,37,0.22)]">
-            {/* Chat-only view: one centered reading column, full height */}
+            {/* Chat-only view: dedicated centered AI chat, full height */}
             {viewMode === "chat" ? (
-              <div className="flex-1 flex justify-center min-h-0">
-                <aside className="flex flex-col w-full max-w-3xl min-h-0 border-x border-border px-6">
-                  {sidebar}
-                </aside>
-              </div>
+              chatView
             ) : (
               <>
                 <div

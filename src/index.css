@@ -500,6 +500,68 @@ body::before {
   flex-shrink: 0;
 }
 
+/* ── AI chat (matches the dedicated chat-view design) ──────────────
+   A brighter azure blue for the conversation surface — distinct from
+   the indigo app accent, per the chat design. */
+.chat-avatar {
+  display: grid;
+  place-items: center;
+  width: 2.25rem;          /* 36px */
+  height: 2.25rem;
+  flex-shrink: 0;
+  border-radius: 0.875rem;
+  background: #e7f0fd;
+  color: #1668e3;
+}
+.bubble-agent {
+  background: #f1f5fa;
+  border: 1px solid #e4eaf3;
+  color: var(--color-text-primary);
+  border-radius: 1.25rem;
+  box-shadow: 0 2px 14px -10px rgba(14, 21, 37, 0.18);
+}
+.bubble-user {
+  background: #1668e3;
+  color: #fff;
+  border-radius: 1.25rem;
+  box-shadow: 0 8px 20px -8px rgba(22, 104, 227, 0.5);
+}
+/* Soft-blue inline code pills inside agent bubbles (e.g. `14 → 25`) */
+.bubble-agent .md code {
+  background: #e1ecfd;
+  color: #1668e3;
+  border-color: #cfe0fb;
+}
+/* Circular send button on the chat composer */
+.chat-send {
+  display: grid;
+  place-items: center;
+  width: 2.75rem;          /* 44px */
+  height: 2.75rem;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: #1668e3;
+  color: #fff;
+  cursor: pointer;
+  transition: transform 0.12s ease, filter 0.15s ease, box-shadow 0.15s ease;
+  box-shadow: 0 6px 16px -6px rgba(22, 104, 227, 0.5);
+}
+.chat-send:hover:not(:disabled) { filter: brightness(1.08); transform: translateY(-1px); box-shadow: 0 10px 22px -8px rgba(22, 104, 227, 0.55); }
+.chat-send:active:not(:disabled) { transform: scale(0.95); }
+.chat-send:disabled { opacity: 0.4; cursor: not-allowed; }
+/* Big rounded chat composer field */
+.chat-composer {
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-border);
+  border-radius: 1.375rem;
+  box-shadow: 0 8px 30px -18px rgba(14, 21, 37, 0.18);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.chat-composer:focus-within {
+  border-color: rgba(22, 104, 227, 0.45);
+  box-shadow: 0 0 0 3px rgba(22, 104, 227, 0.1), 0 8px 30px -18px rgba(14, 21, 37, 0.18);
+}
+
 /* Small toggle pill (Route through PI) */
 .toggle-pill {
   display: inline-flex;
