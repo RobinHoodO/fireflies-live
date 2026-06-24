@@ -528,7 +528,7 @@ export default function App() {
       <div className="h-24 border-b border-border flex items-center justify-between px-12 lg:px-16 shrink-0">
         <div className="flex items-center gap-4 min-w-0 pl-1">
           <Mic size={16} className="text-accent shrink-0" />
-          <span className="text-[14px] font-semibold text-text-primary tracking-tight">Live transcription</span>
+          <span className="font-display text-[15px] font-bold text-text-primary tracking-tight">Live transcription</span>
           {selectedMeeting && <span className="text-[12px] text-text-muted font-medium truncate max-w-[260px] pl-4 ml-1 border-l border-border">{selectedMeeting.title || selectedMeeting.id.slice(-8)}</span>}
         </div>
         <div className="flex items-center gap-3.5 shrink-0">
@@ -551,7 +551,7 @@ export default function App() {
               <div className="mx-auto mb-8 grid place-items-center w-16 h-16 rounded-3xl bg-accent-dim border border-accent/15">
                 <Radio size={28} className="text-accent" />
               </div>
-              <h2 className="text-[19px] font-semibold text-text-primary tracking-tight">Listen in on a live meeting</h2>
+              <h2 className="font-display text-[20px] font-bold text-text-primary tracking-tight">Listen in on a live meeting</h2>
               <p className="text-[13px] text-text-muted mt-3 leading-relaxed max-w-[400px] mx-auto">
                 We auto-detect your active Fireflies meetings. Pick one and hit Connect — or paste a meeting ID to jump straight in.
               </p>
@@ -892,9 +892,9 @@ export default function App() {
               <div className="flex items-start gap-3 animate-fade-in">
                 <span className="chat-avatar !w-8 !h-8"><Sparkles size={15} /></span>
                 <div className="bubble-agent px-6 py-5 inline-flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#1668e3] animate-pulse" />
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#1668e3] animate-pulse [animation-delay:150ms]" />
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#1668e3] animate-pulse [animation-delay:300ms]" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#2f6bdb] animate-pulse" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#2f6bdb] animate-pulse [animation-delay:150ms]" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#2f6bdb] animate-pulse [animation-delay:300ms]" />
                 </div>
               </div>
             )}
@@ -943,9 +943,9 @@ export default function App() {
         <div className="animate-fade-in flex items-start gap-3.5">
           <span className="chat-avatar"><Sparkles size={17} /></span>
           <div className="bubble-agent px-6 py-5 inline-flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#1668e3] animate-pulse" />
-            <span className="w-1.5 h-1.5 rounded-full bg-[#1668e3] animate-pulse [animation-delay:150ms]" />
-            <span className="w-1.5 h-1.5 rounded-full bg-[#1668e3] animate-pulse [animation-delay:300ms]" />
+            <span className="w-1.5 h-1.5 rounded-full bg-[#2f6bdb] animate-pulse" />
+            <span className="w-1.5 h-1.5 rounded-full bg-[#2f6bdb] animate-pulse [animation-delay:150ms]" />
+            <span className="w-1.5 h-1.5 rounded-full bg-[#2f6bdb] animate-pulse [animation-delay:300ms]" />
           </div>
         </div>
       )}
@@ -966,7 +966,7 @@ export default function App() {
         <div className="flex items-center gap-4 px-2 pt-12 pb-9 shrink-0">
           <span className="chat-avatar !w-11 !h-11 !rounded-2xl"><Sparkles size={20} /></span>
           <div>
-            <h2 className="text-[18px] font-bold text-text-primary tracking-tight leading-none">AI assistant</h2>
+            <h2 className="font-display text-[18px] font-bold text-text-primary tracking-tight leading-none">AI assistant</h2>
             <p className="text-[13px] text-text-muted font-medium mt-2">Ask anything about this meeting</p>
           </div>
         </div>
@@ -1070,7 +1070,7 @@ export default function App() {
         <header className="h-24 flex items-center justify-between shrink-0 gap-8">
           {/* Left: brand + status pill (with inline Stop when connected) */}
           <div className="flex items-center gap-6 shrink-0 min-w-0">
-            <span className="text-[18px] font-semibold tracking-tight whitespace-nowrap">Fireflies <span className="text-accent">Live</span></span>
+            <span className="font-display text-[18px] font-bold tracking-tight whitespace-nowrap">Fireflies <span className="text-accent">Live</span></span>
             <div className="flex items-center gap-3 pl-5 pr-3.5 h-9 rounded-full bg-surface-1 border border-border shrink-0">
               <span className="relative flex items-center justify-center w-2.5 h-2.5">
                 <span className={`w-2.5 h-2.5 rounded-full ${dot} ${status === "connected" ? "animate-pulse-glow" : ""}`} />
