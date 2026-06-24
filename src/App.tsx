@@ -523,8 +523,8 @@ export default function App() {
   // ── Transcription column ───────────────────────────────────────
   const transcriptColumn = (
     <main className="flex flex-col min-w-0 flex-1 h-full">
-      <div className="h-24 border-b border-border flex items-center justify-between px-10 lg:px-14 shrink-0">
-        <div className="flex items-center gap-4 min-w-0">
+      <div className="h-24 border-b border-border flex items-center justify-between px-12 lg:px-16 shrink-0">
+        <div className="flex items-center gap-4 min-w-0 pl-1">
           <Mic size={16} className="text-accent shrink-0" />
           <span className="text-[14px] font-semibold text-text-primary tracking-tight">Live transcription</span>
           {selectedMeeting && <span className="text-[12px] text-text-muted font-medium truncate max-w-[260px] pl-4 ml-1 border-l border-border">{selectedMeeting.title || selectedMeeting.id.slice(-8)}</span>}
@@ -593,7 +593,7 @@ export default function App() {
 
   // ── Config / context panel ─────────────────────────────────────
   const configPanel = (
-    <div className="border-b border-border px-8 py-9 space-y-9">
+    <div className="border-b border-border px-9 py-9 space-y-9">
       <div className="flex items-center gap-2.5 text-[13px] font-semibold text-text-primary tracking-tight">
         <Settings2 size={15} className="text-accent" /> Agent configuration
       </div>
@@ -609,15 +609,15 @@ export default function App() {
               : <><Wand2 size={12} /> Suggest from meeting</>}
           </button>
         </div>
-        <div className="flex flex-wrap gap-3">
+        <div className="flex flex-wrap gap-x-4 gap-y-3.5 pr-1">
           {AGENT_MODES.map(m => (
-            <button key={m.label} onClick={() => setAgentContext(m.context)} data-active={agentContext === m.context} className="chip">
+            <button key={m.label} onClick={() => setAgentContext(m.context)} data-active={agentContext === m.context} className="chip px-4 py-2.5">
               {m.label}
             </button>
           ))}
           {proposedModes.map(m => (
             <button key={`p-${m.label}`} onClick={() => setAgentContext(m.context)} data-active={agentContext === m.context}
-              className="chip" title={m.context}>
+              className="chip px-4 py-2.5" title={m.context}>
               <Sparkles size={11} /> {m.label}
             </button>
           ))}
@@ -643,10 +643,10 @@ export default function App() {
       {/* Feature flags */}
       <div className="space-y-3">
         <span className="block text-[11px] font-semibold text-text-secondary uppercase tracking-wider">Features</span>
-        <div className="flex flex-wrap gap-3">
+        <div className="flex flex-wrap gap-x-4 gap-y-3.5 pr-1">
           {(Object.keys(flags) as (keyof FeatureFlags)[]).map(k => (
             <button key={k} onClick={() => setFlags(p => ({ ...p, [k]: !p[k] }))}
-              className={`shrink-0 px-5 py-2.5 rounded-full text-[11px] font-semibold transition-all cursor-pointer ${flags[k] ? "bg-accent text-white shadow-[0_2px_8px_-2px_var(--color-accent-glow)]" : "bg-surface-2 text-text-muted hover:text-text-secondary"}`}>
+              className={`shrink-0 px-5 py-3 rounded-full text-[11px] font-semibold transition-all cursor-pointer ${flags[k] ? "bg-accent text-white shadow-[0_2px_8px_-2px_var(--color-accent-glow)]" : "bg-surface-2 text-text-muted hover:text-text-secondary"}`}>
               {k.replace(/([A-Z])/g, " $1").replace(/^./, s => s.toUpperCase())}
             </button>
           ))}
@@ -659,7 +659,7 @@ export default function App() {
   const terminalPane = (
     <div className="border-b border-border">
       <button onClick={() => setShowTerminal(v => !v)}
-        className="w-full h-16 flex items-center justify-between px-7 text-[13px] font-semibold text-text-primary tracking-tight hover:bg-surface-2/60 transition-colors">
+        className="w-full min-h-16 flex items-center justify-between px-8 py-5 text-[13px] font-semibold text-text-primary tracking-tight hover:bg-surface-2/60 transition-colors">
         <div className="flex items-center gap-2.5">
           <Terminal size={15} className="text-accent" /> Backend Terminal · PI
           <span className={`bridge-dot ${bridgeOnline ? "online" : "offline"}`} title={bridgeOnline ? "Bridge online" : "Bridge offline"} />
@@ -668,9 +668,9 @@ export default function App() {
       </button>
 
       {showTerminal && (
-        <div className="px-7 pb-8 space-y-5">
+        <div className="px-8 pb-8 space-y-5">
           {/* Output console */}
-          <div ref={termScrollRef} className="term-screen px-6 py-5 h-[240px] overflow-y-auto space-y-1.5">
+          <div ref={termScrollRef} className="term-screen px-7 py-6 h-[240px] overflow-y-auto space-y-1.5">
             {termLines.length === 0 ? (
               <div className="term-empty term-line leading-relaxed">
                 Delegate shell tasks to your machine.{"\n"}Bridge runs on 127.0.0.1.
@@ -707,8 +707,8 @@ export default function App() {
           )}
 
           {/* Input row */}
-          <div className="space-y-3.5">
-            <div className="field flex items-center gap-2.5 pl-4 pr-2.5 py-2.5">
+          <div className="space-y-4">
+            <div className="field flex items-center gap-2.5 pl-5 pr-3 py-3">
               <Terminal size={15} className="text-text-muted shrink-0" />
               <input
                 value={termInput}
@@ -722,7 +722,7 @@ export default function App() {
               </button>
             </div>
 
-            <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-3.5 flex-wrap pt-0.5">
               <button onClick={() => setUsePI(v => !v)} data-active={usePI} className="toggle-pill" title="Route the command through PI instead of running it raw">
                 <span className="toggle-track"><span className="toggle-knob" /></span>
                 Route through PI
@@ -760,23 +760,23 @@ export default function App() {
         {/* Suggestions — live news-feed, newest first, filterable + collapsible */}
         {flags.aiSuggestions && (
           <div className="border-b border-border">
-            <div className="min-h-16 flex items-center justify-between px-8 py-5 gap-4">
+            <div className="min-h-16 flex items-center justify-between px-9 py-5 gap-6">
               <div className="flex items-center text-[13px] font-semibold text-text-primary tracking-tight"><Lightbulb size={15} className="mr-2.5 text-amber-500" /> Live feed</div>
               <label className="flex items-center gap-2 cursor-pointer" title="How often the AI refreshes suggestions">
                 <Gauge size={13} className="text-text-muted" />
                 <select value={pulseMs} onChange={e => setPulseMs(Number(e.target.value))}
-                  className="field !w-auto text-[11px] font-semibold pl-3 pr-2 py-2 cursor-pointer">
+                  className="field !w-auto text-[11px] font-semibold pl-3.5 pr-3 py-2 cursor-pointer">
                   {PULSE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
               </label>
             </div>
 
             {/* Filter chip row */}
-            <div className="flex items-center gap-3 px-8 pb-3">
+            <div className="flex items-center gap-3.5 px-9 pt-1 pb-4">
               {SUGG_FILTERS.map(f => {
                 const count = f.value === "all" ? suggestions.length : suggestions.filter(s => s.type === f.value).length;
                 return (
-                  <button key={f.value} onClick={() => setSuggFilter(f.value)} data-active={suggFilter === f.value} className="chip-filter">
+                  <button key={f.value} onClick={() => setSuggFilter(f.value)} data-active={suggFilter === f.value} className="chip-filter px-3.5 py-2">
                     {f.label}
                     {count > 0 && <span className="tabular-nums opacity-70">{count}</span>}
                   </button>
@@ -785,7 +785,7 @@ export default function App() {
             </div>
 
             {!orKey && (
-              <div className="px-7 pb-1 pt-1">
+              <div className="px-9 pb-1 pt-1">
                 <span className="offline-note">
                   <span className="offline-note-dot" />
                   AI offline — set OPENROUTER_API
@@ -793,7 +793,7 @@ export default function App() {
               </div>
             )}
 
-            <div className="px-6 pt-3 pb-7 space-y-3.5">
+            <div className="px-8 pt-3 pb-8 space-y-3.5">
               {filteredSuggestions.length === 0 && (
                 <p className="text-[12.5px] text-text-muted px-3 py-2.5 font-medium leading-relaxed">
                   {suggestions.length === 0
@@ -836,13 +836,13 @@ export default function App() {
         {flags.codePalette && (
           <div className="border-b border-border">
             <button onClick={() => setShowPalette(!showPalette)}
-              className="w-full h-16 flex items-center justify-between px-7 text-[13px] font-semibold text-text-primary tracking-tight hover:bg-surface-2/60 transition-colors">
+              className="w-full min-h-16 flex items-center justify-between px-8 py-5 text-[13px] font-semibold text-text-primary tracking-tight hover:bg-surface-2/60 transition-colors">
               <div className="flex items-center gap-2.5"><Command size={15} className="text-accent" /> Code Palette</div>
               <span className="grid place-items-center w-7 h-7 rounded-lg text-text-muted">{showPalette ? <ChevronUp size={15} /> : <ChevronDown size={15} />}</span>
             </button>
             {showPalette && (
-              <div className="px-6 pb-7">
-                <div className="flex gap-3 mb-5 flex-wrap">
+              <div className="px-8 pb-8">
+                <div className="flex gap-3.5 mb-5 flex-wrap">
                   {cats.map(c => <button key={c} onClick={() => setActiveCategory(c)} className={`shrink-0 px-4 py-2.5 rounded-full text-[11px] font-semibold capitalize transition-colors ${activeCategory === c ? "bg-accent text-white" : "bg-surface-2 text-text-muted hover:text-text-secondary"}`}>{c}</button>)}
                 </div>
                 <div className="space-y-2">
@@ -863,11 +863,11 @@ export default function App() {
 
         {/* AI Chat */}
         <div className="flex flex-col">
-          <div className="h-16 flex items-center px-7 text-[13px] font-semibold text-text-primary tracking-tight shrink-0">
+          <div className="h-16 flex items-center px-8 text-[13px] font-semibold text-text-primary tracking-tight shrink-0">
             <MessageSquare size={15} className="mr-2.5 text-accent" /> {orKey ? "AI Assistant" : "System Chat"}
             {aiLoading && <span className="ml-2.5 inline-flex items-center gap-1.5 text-accent text-[11px] font-medium"><span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />thinking</span>}
           </div>
-          <div ref={chatScrollRef} className="px-7 space-y-6 pb-4">
+          <div ref={chatScrollRef} className="px-8 space-y-6 pb-4">
             {chatMessages.length === 0 && <p className="text-[12.5px] text-text-muted py-2.5 px-1 font-medium leading-relaxed">{orKey ? "Tap a suggestion or quick action, or just ask anything about the meeting." : "Chat with the system."}</p>}
             {chatMessages.map(m => (
               <div key={m.id} className={`animate-fade-in flex flex-col ${m.role === "user" ? "items-end" : "items-start"}`}>
@@ -898,14 +898,14 @@ export default function App() {
       </div>
 
       {/* Chat composer — pinned */}
-      <div className="p-6 border-t border-border shrink-0 space-y-3.5">
+      <div className="px-8 py-6 border-t border-border shrink-0 space-y-3.5">
         {!orKey && (
           <span className="offline-note">
             <span className="offline-note-dot" />
             AI offline — set OPENROUTER_API
           </span>
         )}
-        <div className="field flex gap-2.5 items-center pl-5 pr-3 py-3">
+        <div className="field flex gap-2.5 items-center pl-5 pr-3.5 py-3">
           <input value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => e.key === "Enter" && handleChat()}
             placeholder={orKey ? "Ask the AI anything..." : "Type a message..."}
             className="flex-1 bg-transparent text-[13px] text-text-primary placeholder-text-muted outline-none font-medium" />
@@ -1001,9 +1001,9 @@ export default function App() {
         {/* === TOP BAR === */}
         <header className="h-24 flex items-center justify-between shrink-0 gap-8">
           {/* Left: brand + status pill (with inline Stop when connected) */}
-          <div className="flex items-center gap-4 shrink-0 min-w-0">
+          <div className="flex items-center gap-6 shrink-0 min-w-0">
             <span className="text-[18px] font-semibold tracking-tight whitespace-nowrap">Fireflies <span className="text-accent">Live</span></span>
-            <div className="flex items-center gap-2.5 pl-4 pr-2 h-9 rounded-full bg-surface-1 border border-border shrink-0">
+            <div className="flex items-center gap-3 pl-5 pr-3.5 h-9 rounded-full bg-surface-1 border border-border shrink-0">
               <span className="relative flex items-center justify-center w-2.5 h-2.5">
                 <span className={`w-2.5 h-2.5 rounded-full ${dot} ${status === "connected" ? "animate-pulse-glow" : ""}`} />
               </span>
