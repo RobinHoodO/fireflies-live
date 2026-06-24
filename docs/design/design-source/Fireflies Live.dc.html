@@ -1,0 +1,787 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<template id="__bundler_thumbnail" data-bg-color="#eef3f9">
+  <svg viewBox="0 0 1200 800" xmlns="http://www.w3.org/2000/svg">
+    <rect width="1200" height="800" fill="#eef3f9"/>
+    <rect x="120" y="150" width="640" height="500" rx="28" fill="#ffffff" stroke="#dde6f0" stroke-width="3"/>
+    <rect x="800" y="150" width="280" height="500" rx="28" fill="#ffffff" stroke="#dde6f0" stroke-width="3"/>
+    <circle cx="600" cy="400" r="120" fill="none" stroke="#2f6bdb" stroke-width="14"/>
+    <circle cx="600" cy="400" r="26" fill="#2f6bdb"/>
+    <path d="M520 320c-44 44-44 116 0 160M680 320c44 44 44 116 0 160" fill="none" stroke="#2f6bdb" stroke-width="14" stroke-linecap="round"/>
+  </svg>
+</template>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{font-family:'Manrope',system-ui,sans-serif;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;}
+  ::selection{background:var(--ac-tint2,oklch(0.93 0.05 242));}
+  .fl-scroll{scrollbar-width:thin;scrollbar-color:oklch(0.85 0.01 250) transparent;}
+  .fl-scroll::-webkit-scrollbar{width:10px;height:10px;}
+  .fl-scroll::-webkit-scrollbar-thumb{background:oklch(0.88 0.008 250);border-radius:99px;border:3px solid transparent;background-clip:content-box;}
+  .fl-scroll::-webkit-scrollbar-thumb:hover{background:oklch(0.8 0.01 250);background-clip:content-box;}
+  @keyframes fl-pulse{0%{transform:scale(1);opacity:.55;}70%{transform:scale(2.6);opacity:0;}100%{opacity:0;}}
+  @keyframes fl-blink{0%,49%{opacity:1;}50%,100%{opacity:0;}}
+  @keyframes fl-rise{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
+  @keyframes fl-slide{from{opacity:0;transform:translateX(24px);}to{opacity:1;transform:translateX(0);}}
+  @keyframes fl-fade{from{opacity:0;}to{opacity:1;}}
+  @keyframes fl-pop{from{opacity:0;transform:translateY(-6px) scale(.98);}to{opacity:1;transform:translateY(0) scale(1);}}
+  @keyframes fl-think{0%,80%,100%{transform:scale(.6);opacity:.4;}40%{transform:scale(1);opacity:1;}}
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;}}
+</style>
+</helmet>
+
+<svg aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden">
+  <defs>
+    <symbol id="i-mic" viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></symbol>
+    <symbol id="i-radio" viewBox="0 0 24 24"><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9C23 8.8 23 15.1 19.1 19"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></symbol>
+    <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="M9.9 15.5A2 2 0 0 0 8.5 14L2.4 12.5a.5.5 0 0 1 0-1L8.5 10A2 2 0 0 0 9.9 8.5l1.6-6.1a.5.5 0 0 1 1 0L14 8.5A2 2 0 0 0 15.5 10l6.1 1.6a.5.5 0 0 1 0 1L15.5 14a2 2 0 0 0-1.4 1.4l-1.6 6.1a.5.5 0 0 1-1 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/></symbol>
+    <symbol id="i-bulb" viewBox="0 0 24 24"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></symbol>
+    <symbol id="i-gauge" viewBox="0 0 24 24"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></symbol>
+    <symbol id="i-command" viewBox="0 0 24 24"><path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3"/></symbol>
+    <symbol id="i-terminal" viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></symbol>
+    <symbol id="i-plug" viewBox="0 0 24 24"><path d="M12 22v-5"/><path d="M9 8V2"/><path d="M15 8V2"/><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="M14.5 21.7a.5.5 0 0 0 .9 0l6.5-19a.5.5 0 0 0-.6-.6l-19 6.5a.5.5 0 0 0 0 .9l7.9 3.2a2 2 0 0 1 1.1 1.1z"/><path d="m21.9 2.1-10.9 11"/></symbol>
+    <symbol id="i-message" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24"><path d="m18 15-6-6-6 6"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/></symbol>
+    <symbol id="i-columns" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M12 3v18"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+    <symbol id="i-bot" viewBox="0 0 24 24"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><path d="M12.2 2h-.4a2 2 0 0 0-2 2v.2a2 2 0 0 1-1 1.7l-.4.3a2 2 0 0 1-2 0l-.2-.1a2 2 0 0 0-2.7.8l-.2.3a2 2 0 0 0 .7 2.7l.2.1a2 2 0 0 1 1 1.7v.5a2 2 0 0 1-1 1.7l-.2.1a2 2 0 0 0-.7 2.7l.2.4a2 2 0 0 0 2.7.7l.2-.1a2 2 0 0 1 2 0l.4.3a2 2 0 0 1 1 1.7V20a2 2 0 0 0 2 2h.4a2 2 0 0 0 2-2v-.2a2 2 0 0 1 1-1.7l.4-.3a2 2 0 0 1 2 0l.2.1a2 2 0 0 0 2.7-.7l.2-.4a2 2 0 0 0-.7-2.7l-.2-.1a2 2 0 0 1-1-1.7v-.5a2 2 0 0 1 1-1.7l.2-.1a2 2 0 0 0 .7-2.7l-.2-.3a2 2 0 0 0-2.7-.8l-.2.1a2 2 0 0 1-2 0l-.4-.3a2 2 0 0 1-1-1.7V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-zap" viewBox="0 0 24 24"><path d="M4 14a1 1 0 0 1-.8-1.6l9.9-10.2a.5.5 0 0 1 .9.5l-1.9 6a1 1 0 0 0 .9 1.3h7a1 1 0 0 1 .8 1.6l-9.9 10.2a.5.5 0 0 1-.9-.5l1.9-6a1 1 0 0 0-.9-1.3z"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></symbol>
+    <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></symbol>
+    <symbol id="i-square" viewBox="0 0 24 24"><rect width="14" height="14" x="5" y="5" rx="3"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></symbol>
+  </defs>
+</svg>
+
+<div style="{{ rootStyle }}" class="fl-scroll">
+  <div style="width:100%;max-width:1660px;margin:0 auto;height:calc(100vh - 56px);display:flex;flex-direction:column;gap:18px;">
+
+    <!-- TOP BAR -->
+    <header style="background:#fff;border:1px solid oklch(0.91 0.006 255);border-radius:18px;box-shadow:0 1px 2px rgba(16,24,40,.04),0 12px 32px -22px rgba(16,24,40,.25);padding:18px 26px;display:flex;align-items:center;gap:24px;flex:0 0 auto;">
+      <div style="display:flex;align-items:center;gap:20px;min-width:0;">
+        <div style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:21px;letter-spacing:-0.02em;color:oklch(0.27 0.025 255);white-space:nowrap;">Fireflies&nbsp;<span style="color:var(--ac,oklch(0.585 0.16 242))">Live</span></div>
+        <div style="display:flex;align-items:center;gap:9px;padding:8px 15px 8px 13px;background:oklch(0.98 0.004 250);border:1px solid oklch(0.92 0.006 255);border-radius:999px;">
+          <span style="position:relative;display:inline-flex;width:9px;height:9px;">
+            <sc-if value="{{ isConnected }}" hint-placeholder-val="{{ true }}"><span style="position:absolute;inset:0;border-radius:50%;background:{{ statusColor }};animation:fl-pulse 2.4s ease-out infinite;"></span></sc-if>
+            <span style="position:relative;width:9px;height:9px;border-radius:50%;background:{{ statusColor }};"></span>
+          </span>
+          <span style="font-size:13px;font-weight:600;color:oklch(0.4 0.02 255);white-space:nowrap;">{{ statusLabel }}</span>
+        </div>
+        <sc-if value="{{ isConnected }}" hint-placeholder-val="{{ true }}">
+          <button onClick="{{ stop }}" style="display:inline-flex;align-items:center;gap:7px;padding:8px 14px;background:#fff;border:1px solid oklch(0.9 0.02 25);border-radius:10px;color:oklch(0.55 0.16 25);font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;" style-hover="background:oklch(0.97 0.02 25);">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><use href="#i-square"/></svg>Stop
+          </button>
+        </sc-if>
+      </div>
+
+      <div style="flex:1 1 auto;"></div>
+
+      <div style="display:flex;align-items:center;gap:14px;flex:0 0 auto;">
+        <!-- view switcher -->
+        <div style="display:flex;gap:4px;padding:5px;background:oklch(0.97 0.005 250);border:1px solid oklch(0.92 0.006 255);border-radius:13px;">
+          <sc-for list="{{ views }}" as="v" hint-placeholder-count="3">
+            <button onClick="{{ v.on }}" style="{{ v.style }}">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="{{ v.iconHref }}"/></svg>
+              <span>{{ v.l }}</span>
+            </button>
+          </sc-for>
+        </div>
+
+        <button onClick="{{ openConfig }}" title="Settings" style="display:inline-flex;align-items:center;justify-content:center;width:42px;height:42px;background:#fff;border:1px solid oklch(0.91 0.006 255);border-radius:12px;color:oklch(0.45 0.02 255);cursor:pointer;flex:0 0 auto;" style-hover="background:oklch(0.98 0.004 250);color:oklch(0.27 0.025 255);">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-settings"/></svg>
+        </button>
+
+        <!-- active meetings -->
+        <div style="position:relative;">
+          <button onClick="{{ toggleMeetings }}" style="display:inline-flex;align-items:center;gap:10px;padding:11px 16px;background:#fff;border:1px solid oklch(0.91 0.006 255);border-radius:12px;color:oklch(0.27 0.025 255);font-family:inherit;font-size:14px;font-weight:600;cursor:pointer;" style-hover="background:oklch(0.98 0.004 250);">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--ac,oklch(0.585 0.16 242))" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-radio"/></svg>
+            Active meetings
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="oklch(0.6 0.015 255)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-down"/></svg>
+          </button>
+          <sc-if value="{{ meetingsOpen }}">
+            <div style="position:absolute;top:calc(100% + 12px);right:0;width:380px;background:#fff;border:1px solid oklch(0.91 0.006 255);border-radius:18px;box-shadow:0 18px 50px -20px rgba(16,24,40,.4);padding:22px;z-index:60;">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+                <div style="font-size:14px;font-weight:700;color:oklch(0.27 0.025 255);">Active meetings</div>
+                <button onClick="{{ refreshMeetings }}" title="Refresh" style="display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border:1px solid oklch(0.92 0.006 255);border-radius:9px;background:#fff;color:oklch(0.5 0.02 255);cursor:pointer;" style-hover="background:oklch(0.98 0.004 250);">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-refresh"/></svg>
+                </button>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:10px;">
+                <sc-for list="{{ meetings }}" as="m" hint-placeholder-count="2">
+                  <div style="display:flex;align-items:center;gap:14px;padding:14px;border:1px solid oklch(0.93 0.006 255);border-radius:13px;" style-hover="border-color:var(--ac-border,oklch(0.84 0.08 242));background:var(--ac-tint,oklch(0.965 0.03 242));">
+                    <span style="position:relative;display:inline-flex;width:8px;height:8px;flex:0 0 auto;"><span style="position:absolute;inset:0;border-radius:50%;background:oklch(0.68 0.16 155);animation:fl-pulse 2.4s ease-out infinite;"></span><span style="position:relative;width:8px;height:8px;border-radius:50%;background:oklch(0.68 0.16 155);"></span></span>
+                    <div style="flex:1 1 auto;min-width:0;">
+                      <div style="font-size:14px;font-weight:700;color:oklch(0.27 0.025 255);">{{ m.title }}</div>
+                      <div style="font-size:12.5px;color:oklch(0.6 0.015 255);margin-top:2px;">{{ m.sub }} · {{ m.time }}</div>
+                    </div>
+                    <button onClick="{{ m.connect }}" style="padding:9px 16px;background:var(--ac,oklch(0.585 0.16 242));border:none;border-radius:10px;color:#fff;font-family:inherit;font-size:13px;font-weight:700;cursor:pointer;flex:0 0 auto;" style-hover="background:var(--ac-hover,oklch(0.5 0.17 242));">Connect</button>
+                  </div>
+                </sc-for>
+              </div>
+              <div style="height:1px;background:oklch(0.93 0.006 255);margin:18px 0;"></div>
+              <div style="font-size:12.5px;font-weight:600;color:oklch(0.5 0.02 255);margin-bottom:10px;">Paste a meeting ID</div>
+              <div style="display:flex;gap:10px;">
+                <input value="{{ pasteId }}" onInput="{{ setPasteId }}" placeholder="app.fireflies.ai/view/…" style="flex:1 1 auto;min-width:0;padding:11px 14px;border:1px solid oklch(0.91 0.006 255);border-radius:11px;font-family:'JetBrains Mono',monospace;font-size:12.5px;color:oklch(0.3 0.02 255);outline:none;" style-focus="border-color:var(--ac,oklch(0.585 0.16 242));box-shadow:0 0 0 3px var(--ac-tint2,oklch(0.93 0.05 242));"/>
+                <button onClick="{{ connectPasted }}" style="padding:0 18px;background:oklch(0.97 0.005 250);border:1px solid oklch(0.91 0.006 255);border-radius:11px;color:oklch(0.3 0.02 255);font-family:inherit;font-size:13px;font-weight:700;cursor:pointer;flex:0 0 auto;" style-hover="background:oklch(0.95 0.006 250);">Connect</button>
+              </div>
+            </div>
+          </sc-if>
+        </div>
+      </div>
+    </header>
+
+    <!-- WORKSPACE -->
+    <div style="flex:1 1 auto;min-height:0;display:flex;gap:18px;">
+
+      <!-- CHAT-ONLY VIEW -->
+      <sc-if value="{{ isChat }}">
+        <div style="flex:1 1 auto;min-width:0;background:#fff;border:1px solid oklch(0.91 0.006 255);border-radius:18px;box-shadow:0 1px 2px rgba(16,24,40,.04),0 12px 32px -24px rgba(16,24,40,.22);display:flex;flex-direction:column;overflow:hidden;">
+          <div style="display:flex;flex-direction:column;width:100%;max-width:820px;margin:0 auto;flex:1 1 auto;min-height:0;">
+            <div style="padding:30px 40px 18px;display:flex;align-items:center;gap:13px;flex:0 0 auto;">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--ac,oklch(0.585 0.16 242))" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-sparkles"/></svg>
+              <div>
+                <div style="font-family:'Space Grotesk',sans-serif;font-size:18px;font-weight:700;color:oklch(0.27 0.025 255);letter-spacing:-0.01em;">AI assistant</div>
+                <div style="font-size:13px;color:oklch(0.6 0.015 255);margin-top:1px;">Ask anything about this meeting</div>
+              </div>
+            </div>
+            <div class="fl-scroll" style="flex:1 1 auto;min-height:0;overflow-y:auto;padding:18px 40px 8px;display:flex;flex-direction:column;gap:22px;">
+              <dc-import name="ChatThread" messages="{{ messages }}" thinking="{{ thinking }}" hint-size="100%,200px"></dc-import>
+            </div>
+            <div style="padding:18px 40px 30px;flex:0 0 auto;">
+              <dc-import name="Composer" value="{{ chatInput }}" oninput="{{ setChatInput }}" onkey="{{ onChatKey }}" onsend="{{ sendChat }}" placeholder="Ask the AI anything…" hint-size="100%,60px"></dc-import>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- TRANSCRIPT (split + transcript-only) -->
+      <sc-if value="{{ showTranscript }}">
+        <div style="{{ leftColStyle }}">
+          <div style="flex:1 1 auto;min-width:0;display:flex;flex-direction:column;background:#fff;border:1px solid oklch(0.91 0.006 255);border-radius:18px;box-shadow:0 1px 2px rgba(16,24,40,.04),0 12px 32px -24px rgba(16,24,40,.22);overflow:hidden;">
+            <!-- transcript header -->
+            <div style="padding:24px 28px;display:flex;align-items:center;gap:18px;flex:0 0 auto;border-bottom:1px solid oklch(0.95 0.005 250);">
+              <div style="display:flex;align-items:center;gap:13px;min-width:0;flex:1 1 auto;">
+                <span style="display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:11px;background:var(--ac-tint,oklch(0.965 0.03 242));flex:0 0 auto;">
+                  <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--ac,oklch(0.585 0.16 242))" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-mic"/></svg>
+                </span>
+                <div style="min-width:0;">
+                  <div style="font-family:'Space Grotesk',sans-serif;font-size:17px;font-weight:700;color:oklch(0.27 0.025 255);letter-spacing:-0.01em;">Live transcription</div>
+                  <sc-if value="{{ isConnected }}" hint-placeholder-val="{{ true }}"><div style="font-size:13px;color:oklch(0.6 0.015 255);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ meetingTitle }}</div></sc-if>
+                </div>
+              </div>
+              <sc-if value="{{ isConnected }}" hint-placeholder-val="{{ true }}">
+                <div style="display:flex;align-items:center;gap:10px;flex:0 0 auto;">
+                  <button onClick="{{ toggleQuestion }}" style="{{ qBtnStyle }}">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-sparkles"/></svg>
+                    Question mode
+                  </button>
+                  <button onClick="{{ copyTranscript }}" title="Copy" style="display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border:1px solid oklch(0.91 0.006 255);border-radius:11px;background:#fff;color:oklch(0.45 0.02 255);cursor:pointer;" style-hover="background:oklch(0.98 0.004 250);color:oklch(0.27 0.025 255);"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-copy"/></svg></button>
+                  <button onClick="{{ exportMd }}" title="Export to Markdown" style="display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border:1px solid oklch(0.91 0.006 255);border-radius:11px;background:#fff;color:oklch(0.45 0.02 255);cursor:pointer;" style-hover="background:oklch(0.98 0.004 250);color:oklch(0.27 0.025 255);"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-download"/></svg></button>
+                </div>
+              </sc-if>
+            </div>
+
+            <!-- transcript body -->
+            <div class="fl-scroll" style="flex:1 1 auto;min-height:0;overflow-y:auto;">
+              <sc-if value="{{ isConnected }}" hint-placeholder-val="{{ true }}">
+                <div style="padding:8px 32px 32px;">
+                  <!-- question banner -->
+                  <sc-if value="{{ questionMode }}">
+                    <div style="position:sticky;top:0;z-index:5;margin:16px 0 26px;padding:20px 22px;background:linear-gradient(180deg,var(--ac-tint,oklch(0.965 0.03 242)),#fff);border:1px solid var(--ac-border,oklch(0.84 0.08 242));border-radius:16px;box-shadow:0 8px 24px -18px var(--ac,oklch(0.585 0.16 242));">
+                      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+                        <span style="display:inline-flex;align-items:center;gap:7px;padding:5px 11px;background:var(--ac,oklch(0.585 0.16 242));border-radius:999px;color:#fff;font-size:11.5px;font-weight:700;letter-spacing:0.01em;">
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-arrow"/></svg>Say this
+                        </span>
+                        <span style="font-size:12.5px;color:var(--ac-text,oklch(0.45 0.17 242));font-weight:600;">Drafted for you · read it aloud</span>
+                        <span style="margin-left:auto;display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:oklch(0.6 0.015 255);"><span style="width:7px;height:7px;border-radius:50%;background:oklch(0.68 0.16 155);"></span>live</span>
+                      </div>
+                      <div style="font-size:15px;line-height:1.65;color:oklch(0.3 0.02 255);" dangerouslySetInnerHTML="{{ qBannerHtml }}"></div>
+                    </div>
+                  </sc-if>
+
+                  <div style="display:flex;flex-direction:column;gap:22px;">
+                    <sc-for list="{{ paragraphs }}" as="p" hint-placeholder-count="4">
+                      <div style="">
+                        <div style="font-size:12.5px;font-weight:700;letter-spacing:0.01em;margin-bottom:5px;color:{{ p.color }};">{{ p.name }}</div>
+                        <div style="font-size:15.5px;line-height:1.7;color:oklch(0.32 0.018 255);">{{ p.text }}</div>
+                      </div>
+                    </sc-for>
+                    <div style="display:flex;align-items:center;gap:8px;padding-top:4px;color:oklch(0.7 0.012 255);font-size:13px;">
+                      <span style="width:7px;height:16px;background:var(--ac,oklch(0.585 0.16 242));border-radius:2px;animation:fl-blink 1.1s steps(1) infinite;display:inline-block;"></span>
+                      <span>Listening…</span>
+                    </div>
+                  </div>
+                </div>
+              </sc-if>
+
+              <!-- empty state -->
+              <sc-if value="{{ isIdle }}" hint-placeholder-val="{{ true }}">
+                <div style="height:100%;min-height:480px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:48px;">
+                  <span style="display:inline-flex;align-items:center;justify-content:center;width:74px;height:74px;border-radius:20px;background:var(--ac-tint,oklch(0.965 0.03 242));margin-bottom:26px;position:relative;">
+                    <span style="position:absolute;inset:0;border-radius:20px;border:2px solid var(--ac-border,oklch(0.84 0.08 242));animation:fl-pulse 2.6s ease-out infinite;"></span>
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--ac,oklch(0.585 0.16 242))" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-radio"/></svg>
+                  </span>
+                  <div style="font-family:'Space Grotesk',sans-serif;font-size:24px;font-weight:700;color:oklch(0.27 0.025 255);letter-spacing:-0.01em;">Pick a meeting and hit Connect</div>
+                  <div style="font-size:15px;line-height:1.6;color:oklch(0.55 0.015 255);max-width:440px;margin-top:12px;">We auto-detect your active Fireflies meetings. Choose one and connect — or paste a meeting ID to jump straight in.</div>
+                  <div style="display:flex;flex-direction:column;gap:14px;width:100%;max-width:460px;margin-top:34px;text-align:left;">
+                    <sc-for list="{{ emptySteps }}" as="s" hint-placeholder-count="3">
+                      <div style="display:flex;align-items:center;gap:16px;padding:18px 20px;border:1px solid oklch(0.93 0.006 255);border-radius:14px;background:#fff;">
+                        <span style="display:inline-flex;align-items:center;justify-content:center;width:42px;height:42px;border-radius:11px;background:var(--ac-tint,oklch(0.965 0.03 242));flex:0 0 auto;"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--ac,oklch(0.585 0.16 242))" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="{{ s.iconHref }}"/></svg></span>
+                        <div><div style="font-size:14.5px;font-weight:700;color:oklch(0.27 0.025 255);">{{ s.title }}</div><div style="font-size:13px;color:oklch(0.58 0.015 255);margin-top:2px;line-height:1.5;">{{ s.body }}</div></div>
+                      </div>
+                    </sc-for>
+                  </div>
+                  <button onClick="{{ toggleMeetings }}" style="margin-top:28px;display:inline-flex;align-items:center;gap:10px;padding:13px 22px;background:var(--ac,oklch(0.585 0.16 242));border:none;border-radius:12px;color:#fff;font-family:inherit;font-size:14.5px;font-weight:700;cursor:pointer;" style-hover="background:var(--ac-hover,oklch(0.5 0.17 242));"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-radio"/></svg>See active meetings</button>
+                </div>
+              </sc-if>
+
+              <sc-if value="{{ isConnecting }}" hint-placeholder-val="{{ true }}">
+                <div style="height:100%;min-height:480px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;color:oklch(0.5 0.02 255);">
+                  <span style="display:inline-flex;width:44px;height:44px;border:3px solid oklch(0.92 0.006 255);border-top-color:var(--ac,oklch(0.585 0.16 242));border-radius:50%;animation:spin .8s linear infinite;"></span>
+                  <div style="font-size:15px;font-weight:600;">Connecting to your meeting…</div>
+                </div>
+              </sc-if>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- DIVIDER -->
+      <sc-if value="{{ isSplit }}">
+        <div onMouseDown="{{ startDrag }}" style="flex:0 0 auto;width:14px;display:flex;align-items:center;justify-content:center;cursor:col-resize;margin:0 -7px;z-index:20;" style-hover="">
+          <div style="width:5px;height:54px;border-radius:99px;background:oklch(0.88 0.008 255);transition:background .15s,height .15s;" style-hover="background:var(--ac,oklch(0.585 0.16 242));height:78px;"></div>
+        </div>
+      </sc-if>
+
+      <!-- SIDEBAR (split only) -->
+      <sc-if value="{{ isSplit }}">
+        <div style="{{ rightColStyle }}">
+          <div class="fl-scroll" style="flex:1 1 0;min-width:0;display:flex;flex-direction:column;background:#fff;border:1px solid oklch(0.91 0.006 255);border-radius:18px;box-shadow:0 1px 2px rgba(16,24,40,.04),0 12px 32px -24px rgba(16,24,40,.22);overflow-y:auto;overflow-x:hidden;">
+            <div style="display:flex;flex-direction:column;padding:26px;gap:26px;">
+
+              <!-- config summary row -->
+              <button onClick="{{ openConfig }}" style="display:flex;align-items:center;gap:14px;width:100%;padding:16px 18px;background:oklch(0.98 0.004 250);border:1px solid oklch(0.92 0.006 255);border-radius:14px;cursor:pointer;text-align:left;" style-hover="background:oklch(0.97 0.005 250);border-color:var(--ac-border,oklch(0.84 0.08 242));">
+                <span style="display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:10px;background:#fff;border:1px solid oklch(0.92 0.006 255);flex:0 0 auto;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--ac,oklch(0.585 0.16 242))" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-sliders"/></svg></span>
+                <div style="flex:1 1 auto;min-width:0;">
+                  <div style="font-size:14px;font-weight:700;color:oklch(0.27 0.025 255);">{{ modeLabel }}</div>
+                  <div style="font-size:12.5px;color:oklch(0.6 0.015 255);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ modelLabel }} · {{ flagsCount }} features on</div>
+                </div>
+                <span style="font-size:12.5px;font-weight:600;color:var(--ac-text,oklch(0.45 0.17 242));white-space:nowrap;flex:0 0 auto;">Configure</span>
+              </button>
+
+              <!-- tab strip (tabbed direction) -->
+              <sc-if value="{{ isTabbed }}">
+                <div style="display:flex;gap:5px;padding:5px;background:oklch(0.97 0.005 250);border:1px solid oklch(0.92 0.006 255);border-radius:13px;">
+                  <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="3">
+                    <button onClick="{{ t.on }}" style="{{ t.style }}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="{{ t.iconHref }}"/></svg>{{ t.l }}</button>
+                  </sc-for>
+                </div>
+              </sc-if>
+
+              <!-- ===== SUGGESTIONS / LIVE FEED ===== -->
+              <sc-if value="{{ feedVisible }}">
+                <section>
+                  <sc-if value="{{ isStacked }}">
+                    <button onClick="{{ toggleFeedSec }}" style="display:flex;align-items:center;gap:11px;width:100%;background:none;border:none;padding:0 0 2px;cursor:pointer;text-align:left;">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--ac,oklch(0.585 0.16 242))" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-bulb"/></svg>
+                      <span style="font-family:'Space Grotesk',sans-serif;font-size:15.5px;font-weight:700;color:oklch(0.27 0.025 255);letter-spacing:-0.01em;flex:1 1 auto;">Live feed</span>
+                      <span style="font-size:12px;font-weight:600;color:oklch(0.6 0.015 255);margin-right:4px;">{{ totalCount }}</span>
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="oklch(0.6 0.015 255)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="{{ feedChevron }}"/></svg>
+                    </button>
+                  </sc-if>
+
+                  <sc-if value="{{ feedOpen }}">
+                    <div style="margin-top:16px;">
+                      <!-- rate -->
+                      <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
+                        <span style="display:inline-flex;align-items:center;gap:7px;font-size:12.5px;color:oklch(0.55 0.015 255);font-weight:600;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-gauge"/></svg>Pulse rate</span>
+                        <div style="flex:1 1 auto;"></div>
+                        <select value="{{ rate }}" onChange="{{ setRate }}" style="appearance:none;-webkit-appearance:none;padding:9px 38px 9px 14px;border:1px solid oklch(0.91 0.006 255);border-radius:10px;background:#fff url('data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2216%22 height=%2216%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22%23888%22 stroke-width=%222%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22><path d=%22m6 9 6 6 6-6%22/></svg>') no-repeat right 12px center;font-family:inherit;font-size:13px;font-weight:600;color:oklch(0.3 0.02 255);cursor:pointer;outline:none;" style-focus="border-color:var(--ac,oklch(0.585 0.16 242));box-shadow:0 0 0 3px var(--ac-tint2,oklch(0.93 0.05 242));">
+                          <option value="8s">Fast · 8s</option><option value="12s">Normal · 12s</option><option value="20s">Relaxed · 20s</option><option value="30s">Slow · 30s</option><option value="off">Paused</option>
+                        </select>
+                      </div>
+                      <!-- filters -->
+                      <div style="display:flex;flex-wrap:wrap;gap:9px;margin-bottom:18px;">
+                        <sc-for list="{{ filters }}" as="f" hint-placeholder-count="4">
+                          <button onClick="{{ f.on }}" style="{{ f.style }}">{{ f.l }}<sc-if value="{{ f.showCount }}"><span style="{{ f.countStyle }}">{{ f.count }}</span></sc-if></button>
+                        </sc-for>
+                      </div>
+                      <!-- cards -->
+                      <div style="display:flex;flex-direction:column;gap:12px;">
+                        <sc-for list="{{ visibleSuggestions }}" as="s" hint-placeholder-count="3">
+                          <button onClick="{{ s.tap }}" style="display:flex;gap:14px;width:100%;padding:16px 18px;background:#fff;border:1px solid oklch(0.93 0.006 255);border-radius:14px;cursor:pointer;text-align:left;" style-hover="border-color:{{ s.color }};box-shadow:0 8px 22px -18px {{ s.color }};">
+                            <span style="display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:10px;flex:0 0 auto;background:{{ s.bg }};"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="{{ s.color }}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="{{ s.iconHref }}"/></svg></span>
+                            <div style="flex:1 1 auto;min-width:0;">
+                              <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;">
+                                <span style="font-size:10.5px;font-weight:700;letter-spacing:0.03em;text-transform:uppercase;color:{{ s.color }};">{{ s.kind }}</span>
+                                <span style="font-size:11.5px;color:oklch(0.68 0.012 255);">{{ s.rel }}</span>
+                              </div>
+                              <div style="font-size:14px;line-height:1.55;color:oklch(0.32 0.018 255);">{{ s.text }}</div>
+                            </div>
+                          </button>
+                        </sc-for>
+                      </div>
+                      <sc-if value="{{ hasMore }}">
+                        <button onClick="{{ toggleFeedExpand }}" style="margin-top:14px;width:100%;padding:11px;background:oklch(0.98 0.004 250);border:1px solid oklch(0.93 0.006 255);border-radius:11px;color:oklch(0.45 0.02 255);font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;" style-hover="background:oklch(0.96 0.006 250);">{{ moreLabel }}</button>
+                      </sc-if>
+                      <sc-if value="{{ feedEmpty }}">
+                        <div style="padding:24px;text-align:center;font-size:13.5px;color:oklch(0.6 0.015 255);line-height:1.5;">Suggestions stream in here as the conversation evolves — newest on top. Tap one to ask the AI.</div>
+                      </sc-if>
+                    </div>
+                  </sc-if>
+                </section>
+              </sc-if>
+
+              <sc-if value="{{ showDivider1 }}"><div style="height:1px;background:oklch(0.94 0.005 250);"></div></sc-if>
+
+              <!-- ===== AI CHAT ===== -->
+              <sc-if value="{{ chatVisible }}">
+                <section style="display:flex;flex-direction:column;{{ chatSecGrow }}">
+                  <sc-if value="{{ isStacked }}">
+                    <button onClick="{{ toggleChatSec }}" style="display:flex;align-items:center;gap:11px;width:100%;background:none;border:none;padding:0 0 2px;cursor:pointer;text-align:left;">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--ac,oklch(0.585 0.16 242))" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-message"/></svg>
+                      <span style="font-family:'Space Grotesk',sans-serif;font-size:15.5px;font-weight:700;color:oklch(0.27 0.025 255);letter-spacing:-0.01em;flex:1 1 auto;">AI assistant</span>
+                      <sc-if value="{{ aiOffline }}"><span style="font-size:11.5px;font-weight:600;color:oklch(0.62 0.015 255);margin-right:6px;">AI offline</span></sc-if>
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="oklch(0.6 0.015 255)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="{{ chatChevron }}"/></svg>
+                    </button>
+                  </sc-if>
+                  <sc-if value="{{ chatOpen }}">
+                    <div style="margin-top:16px;display:flex;flex-direction:column;gap:18px;{{ chatBodyGrow }}">
+                      <div class="fl-scroll" style="display:flex;flex-direction:column;gap:20px;{{ chatScrollStyle }}">
+                        <dc-import name="ChatThread" messages="{{ messages }}" thinking="{{ thinking }}" hint-size="100%,200px"></dc-import>
+                      </div>
+                      <dc-import name="Composer" value="{{ chatInput }}" oninput="{{ setChatInput }}" onkey="{{ onChatKey }}" onsend="{{ sendChat }}" placeholder="Ask the AI anything…" hint-size="100%,60px"></dc-import>
+                    </div>
+                  </sc-if>
+                </section>
+              </sc-if>
+
+              <sc-if value="{{ showDivider2 }}"><div style="height:1px;background:oklch(0.94 0.005 250);"></div></sc-if>
+
+              <!-- ===== BACKEND TERMINAL ===== -->
+              <sc-if value="{{ termVisible }}">
+                <section>
+                  <sc-if value="{{ isStacked }}">
+                    <button onClick="{{ toggleTermSec }}" style="display:flex;align-items:center;gap:11px;width:100%;background:none;border:none;padding:0 0 2px;cursor:pointer;text-align:left;">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--ac,oklch(0.585 0.16 242))" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-terminal"/></svg>
+                      <span style="font-family:'Space Grotesk',sans-serif;font-size:15.5px;font-weight:700;color:oklch(0.27 0.025 255);letter-spacing:-0.01em;flex:1 1 auto;">Backend terminal</span>
+                      <span style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;color:oklch(0.6 0.015 255);margin-right:6px;"><span style="width:7px;height:7px;border-radius:50%;background:oklch(0.68 0.16 155);"></span>PI online</span>
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="oklch(0.6 0.015 255)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="{{ termChevron }}"/></svg>
+                    </button>
+                  </sc-if>
+                  <sc-if value="{{ termOpen }}">
+                    <div style="margin-top:16px;">
+                      <!-- console -->
+                      <div class="fl-scroll" style="background:oklch(0.2 0.025 260);border-radius:14px;padding:20px 22px;min-height:200px;max-height:280px;overflow-y:auto;font-family:'JetBrains Mono',monospace;font-size:12.5px;line-height:1.7;">
+                        <sc-for list="{{ termLines }}" as="l" hint-placeholder-count="2">
+                          <div style="color:{{ l.color }};white-space:pre-wrap;word-break:break-word;">{{ l.t }}</div>
+                        </sc-for>
+                      </div>
+                      <!-- confirm bar -->
+                      <sc-if value="{{ pendingCmd }}">
+                        <div style="margin-top:12px;padding:16px 18px;background:oklch(0.97 0.03 75);border:1px solid oklch(0.85 0.08 75);border-radius:13px;">
+                          <div style="display:flex;align-items:center;gap:9px;font-size:13px;font-weight:700;color:oklch(0.45 0.1 60);margin-bottom:6px;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-help"/></svg>Run this on your machine?</div>
+                          <div style="font-family:'JetBrains Mono',monospace;font-size:12.5px;color:oklch(0.35 0.02 255);background:#fff;border:1px solid oklch(0.9 0.02 75);border-radius:8px;padding:9px 12px;margin-bottom:14px;word-break:break-all;">{{ pendingPrefix }}{{ pendingCmd }}</div>
+                          <div style="display:flex;gap:10px;">
+                            <button onClick="{{ cancelCmd }}" style="flex:1 1 auto;padding:10px;background:#fff;border:1px solid oklch(0.9 0.01 255);border-radius:10px;color:oklch(0.4 0.02 255);font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;" style-hover="background:oklch(0.97 0.005 250);">Cancel</button>
+                            <button onClick="{{ confirmCmd }}" style="flex:1 1 auto;padding:10px;background:var(--ac,oklch(0.585 0.16 242));border:none;border-radius:10px;color:#fff;font-family:inherit;font-size:13px;font-weight:700;cursor:pointer;" style-hover="background:var(--ac-hover,oklch(0.5 0.17 242));">Run command</button>
+                          </div>
+                        </div>
+                      </sc-if>
+                      <!-- input row -->
+                      <div style="margin-top:12px;display:flex;align-items:center;gap:10px;padding:8px 8px 8px 16px;background:#fff;border:1px solid oklch(0.91 0.006 255);border-radius:13px;" style-focus-within="border-color:var(--ac,oklch(0.585 0.16 242));box-shadow:0 0 0 3px var(--ac-tint2,oklch(0.93 0.05 242));">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="oklch(0.6 0.015 255)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex:0 0 auto;"><use href="#i-terminal"/></svg>
+                        <input value="{{ termInput }}" onInput="{{ setTermInput }}" onKeyDown="{{ onTermKey }}" placeholder="Type a shell command…" style="flex:1 1 auto;min-width:0;border:none;outline:none;background:none;font-family:'JetBrains Mono',monospace;font-size:13px;color:oklch(0.3 0.02 255);"/>
+                        <button onClick="{{ submitTerm }}" style="display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:9px;background:var(--ac,oklch(0.585 0.16 242));border:none;color:#fff;cursor:pointer;flex:0 0 auto;" style-hover="background:var(--ac-hover,oklch(0.5 0.17 242));"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-send"/></svg></button>
+                      </div>
+                      <!-- route toggle -->
+                      <button onClick="{{ toggleRoute }}" style="margin-top:12px;display:flex;align-items:center;gap:12px;width:100%;padding:13px 16px;background:oklch(0.98 0.004 250);border:1px solid oklch(0.93 0.006 255);border-radius:12px;cursor:pointer;text-align:left;">
+                        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--ac,oklch(0.585 0.16 242))" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex:0 0 auto;"><use href="#i-plug"/></svg>
+                        <span style="flex:1 1 auto;font-size:13.5px;font-weight:600;color:oklch(0.32 0.018 255);">Route through PI</span>
+                        <span style="{{ routeTrack }}"><span style="{{ routeKnob }}"></span></span>
+                      </button>
+                    </div>
+                  </sc-if>
+                </section>
+              </sc-if>
+
+            </div>
+          </div>
+        </div>
+      </sc-if>
+    </div>
+  </div>
+
+  <!-- CONFIG SLIDE-OVER -->
+  <sc-if value="{{ configOpen }}">
+    <div onClick="{{ closeConfig }}" style="position:fixed;inset:0;background:oklch(0.2 0.02 260 / 0.32);z-index:90;"></div>
+    <div class="fl-scroll" style="position:fixed;top:0;right:0;bottom:0;width:460px;max-width:92vw;background:oklch(0.99 0.003 250);border-left:1px solid oklch(0.91 0.006 255);box-shadow:-24px 0 60px -30px rgba(16,24,40,.5);z-index:91;overflow-y:auto;">
+      <div style="position:sticky;top:0;background:oklch(0.99 0.003 250 / 0.9);backdrop-filter:blur(8px);padding:26px 30px;display:flex;align-items:center;gap:13px;border-bottom:1px solid oklch(0.93 0.006 255);z-index:2;">
+        <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="var(--ac,oklch(0.585 0.16 242))" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-sliders"/></svg>
+        <div style="flex:1 1 auto;font-family:'Space Grotesk',sans-serif;font-size:18px;font-weight:700;color:oklch(0.27 0.025 255);letter-spacing:-0.01em;">Agent configuration</div>
+        <button onClick="{{ closeConfig }}" style="display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:10px;border:1px solid oklch(0.92 0.006 255);background:#fff;color:oklch(0.45 0.02 255);cursor:pointer;" style-hover="background:oklch(0.97 0.005 250);"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-x"/></svg></button>
+      </div>
+
+      <div style="padding:30px;display:flex;flex-direction:column;gap:34px;">
+        <!-- agent mode -->
+        <div>
+          <div style="font-size:15px;font-weight:700;color:oklch(0.27 0.025 255);margin-bottom:6px;">Agent mode</div>
+          <div style="font-size:13px;color:oklch(0.58 0.015 255);margin-bottom:16px;line-height:1.5;">Sets the assistant's operating context for this call.</div>
+          <div style="display:flex;flex-wrap:wrap;gap:10px;">
+            <sc-for list="{{ modeChips }}" as="m" hint-placeholder-count="6"><button onClick="{{ m.on }}" style="{{ m.style }}">{{ m.l }}</button></sc-for>
+            <sc-for list="{{ suggestedChips }}" as="m" hint-placeholder-count="0"><button onClick="{{ m.on }}" style="{{ m.style }}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-sparkles"/></svg>{{ m.l }}</button></sc-for>
+          </div>
+          <button onClick="{{ suggestModes }}" style="margin-top:14px;display:inline-flex;align-items:center;gap:9px;padding:11px 16px;background:var(--ac-tint,oklch(0.965 0.03 242));border:1px solid var(--ac-border,oklch(0.84 0.08 242));border-radius:11px;color:var(--ac-text,oklch(0.45 0.17 242));font-family:inherit;font-size:13px;font-weight:700;cursor:pointer;" style-hover="background:var(--ac-tint2,oklch(0.93 0.05 242));"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-sparkles"/></svg>Suggest from meeting</button>
+          <textarea value="{{ customContext }}" onInput="{{ setCustomContext }}" placeholder="Add custom context — e.g. “Enterprise renewal, focus on security and SSO.”" style="margin-top:16px;width:100%;min-height:84px;resize:vertical;padding:14px 16px;border:1px solid oklch(0.91 0.006 255);border-radius:12px;font-family:inherit;font-size:13.5px;line-height:1.6;color:oklch(0.3 0.02 255);outline:none;" style-focus="border-color:var(--ac,oklch(0.585 0.16 242));box-shadow:0 0 0 3px var(--ac-tint2,oklch(0.93 0.05 242));"></textarea>
+        </div>
+
+        <div style="height:1px;background:oklch(0.93 0.006 255);"></div>
+
+        <!-- model -->
+        <div>
+          <div style="font-size:15px;font-weight:700;color:oklch(0.27 0.025 255);margin-bottom:6px;">AI model</div>
+          <div style="font-size:13px;color:oklch(0.58 0.015 255);margin-bottom:16px;line-height:1.5;">Routed through OpenRouter.</div>
+          <div style="display:flex;flex-direction:column;gap:20px;">
+            <sc-for list="{{ modelGroups }}" as="g" hint-placeholder-count="3">
+              <div>
+                <div style="font-size:11.5px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:oklch(0.6 0.015 255);margin-bottom:10px;">{{ g.p }}</div>
+                <div style="display:flex;flex-direction:column;gap:8px;">
+                  <sc-for list="{{ g.items }}" as="it" hint-placeholder-count="2">
+                    <button onClick="{{ it.on }}" style="{{ it.style }}"><span>{{ it.l }}</span><sc-if value="{{ it.active }}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--ac,oklch(0.585 0.16 242))" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><use href="#i-check"/></svg></sc-if></button>
+                  </sc-for>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+
+        <div style="height:1px;background:oklch(0.93 0.006 255);"></div>
+
+        <!-- features -->
+        <div>
+          <div style="font-size:15px;font-weight:700;color:oklch(0.27 0.025 255);margin-bottom:6px;">Features</div>
+          <div style="font-size:13px;color:oklch(0.58 0.015 255);margin-bottom:16px;line-height:1.5;">Toggle what the assistant tracks live.</div>
+          <div style="display:flex;flex-direction:column;gap:10px;">
+            <sc-for list="{{ flagChips }}" as="f" hint-placeholder-count="6">
+              <button onClick="{{ f.on }}" style="display:flex;align-items:center;gap:14px;width:100%;padding:14px 16px;background:#fff;border:1px solid oklch(0.92 0.006 255);border-radius:12px;cursor:pointer;text-align:left;" style-hover="border-color:var(--ac-border,oklch(0.84 0.08 242));">
+                <span style="flex:1 1 auto;font-size:14px;font-weight:600;color:oklch(0.3 0.02 255);">{{ f.l }}</span>
+                <span style="{{ f.track }}"><span style="{{ f.knob }}"></span></span>
+              </button>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:900},&quot;accent&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;Azure&quot;,&quot;Teal&quot;,&quot;Indigo&quot;],&quot;default&quot;:&quot;Azure&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;sidebarLayout&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;stacked&quot;,&quot;tabbed&quot;],&quot;default&quot;:&quot;stacked&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;defaultView&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;transcript&quot;,&quot;split&quot;,&quot;chat&quot;],&quot;default&quot;:&quot;split&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;questionModeDefault&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;}}">
+class Component extends DCLogic {
+  constructor(props){
+    super(props);
+    const now = Date.now();
+    this.PALETTES = {
+      Azure:  {ac:'oklch(0.585 0.16 242)', hover:'oklch(0.5 0.17 242)', tint:'oklch(0.965 0.03 242)', tint2:'oklch(0.93 0.05 242)', border:'oklch(0.84 0.08 242)', text:'oklch(0.45 0.17 242)'},
+      Teal:   {ac:'oklch(0.62 0.11 200)', hover:'oklch(0.53 0.12 200)', tint:'oklch(0.965 0.03 200)', tint2:'oklch(0.93 0.05 200)', border:'oklch(0.83 0.07 200)', text:'oklch(0.46 0.11 200)'},
+      Indigo: {ac:'oklch(0.54 0.18 278)', hover:'oklch(0.46 0.19 278)', tint:'oklch(0.965 0.03 278)', tint2:'oklch(0.93 0.06 278)', border:'oklch(0.83 0.09 278)', text:'oklch(0.45 0.18 278)'},
+    };
+    this.PARAS = [
+      {name:'Maya Chen', color:'oklch(0.55 0.16 25)', text:"Thanks for hopping on. We're evaluating a few tools to cut down the time our CS team spends writing follow-ups after every call."},
+      {name:'You', color:'oklch(0.52 0.16 242)', text:"Totally — that's the pain we hear most. Before I dive in, how big is the CS team today?"},
+      {name:'Maya Chen', color:'oklch(0.55 0.16 25)', text:"We're at fourteen, scaling to maybe twenty-five by end of year. Onboarding new reps fast is the other headache."},
+      {name:'Devin Rao', color:'oklch(0.5 0.14 155)', text:"On onboarding, the shared call library has been the biggest win for our mid-market customers — new hires ramp by listening to real calls."},
+      {name:'Maya Chen', color:'oklch(0.55 0.16 25)', text:"Good to know. What does pricing look like for a team our size — and is there a ramp as we grow?"},
+    ];
+    this.MODES = [{id:'sales',l:'Sales call'},{id:'interview',l:'Interview'},{id:'standup',l:'Standup'},{id:'negotiation',l:'Negotiation'},{id:'oneone',l:'1:1'},{id:'discovery',l:'Discovery'}];
+    this.MODELS = [
+      {p:'Anthropic', items:[{id:'anthropic/claude-sonnet-4',l:'Claude Sonnet 4'},{id:'anthropic/claude-opus-4',l:'Claude Opus 4'},{id:'anthropic/claude-haiku',l:'Claude Haiku'}]},
+      {p:'OpenAI', items:[{id:'openai/gpt-4o',l:'GPT-4o'},{id:'openai/gpt-4o-mini',l:'GPT-4o mini'},{id:'openai/o3',l:'o3'}]},
+      {p:'Google', items:[{id:'google/gemini-2.5-pro',l:'Gemini 2.5 Pro'},{id:'google/gemini-flash',l:'Gemini 2.5 Flash'}]},
+      {p:'DeepSeek', items:[{id:'deepseek/v3',l:'DeepSeek V3'},{id:'deepseek/r1',l:'DeepSeek R1'}]},
+      {p:'Meta Llama', items:[{id:'meta/llama-3.3-70b',l:'Llama 3.3 70B'}]},
+    ];
+    this.FLAGS = [{k:'autosuggest',l:'Auto-suggest'},{k:'sentiment',l:'Sentiment'},{k:'actions',l:'Action items'},{k:'summary',l:'Live summary'},{k:'speakers',l:'Speaker labels'},{k:'profanity',l:'Profanity filter'}];
+    this.MEETINGS = [{id:'acme',title:'Acme Corp',sub:'Discovery · 5 people',time:'12:31'},{id:'internal',title:'Weekly Standup',sub:'Internal · 8 people',time:'04:02'}];
+    this.VIEWS = [{id:'transcript',l:'Transcript',ic:'#i-file'},{id:'split',l:'Split',ic:'#i-columns'},{id:'chat',l:'Chat',ic:'#i-sparkles'}];
+    this.FILTERS = [{id:'all',l:'All'},{id:'ask',l:'Ask'},{id:'do',l:'Do'},{id:'note',l:'Note'}];
+    this.SUGMETA = {
+      ask:  {kind:'Ask', icon:'#i-help', color:'oklch(0.55 0.16 242)', bg:'oklch(0.965 0.03 242)'},
+      do:   {kind:'Do',  icon:'#i-zap',  color:'oklch(0.5 0.14 155)', bg:'oklch(0.96 0.04 155)'},
+      note: {kind:'Note',icon:'#i-bulb', color:'oklch(0.6 0.12 70)',  bg:'oklch(0.97 0.04 75)'},
+    };
+    this._sugPool = [
+      {type:'ask',text:'Ask Maya what success looks like 90 days after rollout.'},
+      {type:'do',text:'Generate a one-line value recap for the chat.'},
+      {type:'note',text:'Devin surfaced the shared call library — strong onboarding hook.'},
+      {type:'ask',text:'Confirm the timeline: when do they want to be live?'},
+      {type:'do',text:'Draft a follow-up email with pricing tiers attached.'},
+      {type:'note',text:'Decision likely involves more than Maya — map the buying group.'},
+    ];
+    this._sugN = 100;
+    this.state = {
+      accent: props.accent || 'Azure',
+      dir: props.sidebarLayout || 'tabbed',
+      view: props.defaultView || 'split',
+      status: 'connected',
+      splitRatio: 0.6,
+      questionMode: props.questionModeDefault !== false,
+      meetingsOpen: false, configOpen: false,
+      sec: {feed:true, chat:true, terminal:false},
+      tab: 'feed', filter: 'all', feedExpanded: false,
+      mode: 'sales', model: 'anthropic/claude-sonnet-4',
+      flags: {autosuggest:true, sentiment:true, actions:true, summary:false, speakers:true, profanity:false},
+      suggested: [], customContext: '', rate: '12s',
+      routePI: false, termInput: '', pendingCmd: null, pasteId: '',
+      chatInput: '', thinking: false,
+      termLines: [
+        {k:'system', t:'PI bridge connected · 127.0.0.1:7842'},
+        {k:'system', t:'Delegate shell tasks to your machine. Every command asks first.'},
+      ],
+      suggestions: [
+        {id:1,type:'note',text:'Budget sensitivity signal — they asked about a ramp as the team grows.',t:now-184000},
+        {id:2,type:'do',text:'Pull mid-market pricing tiers into the chat.',t:now-122000},
+        {id:3,type:'ask',text:'Ask who else is involved in the buying decision.',t:now-61000},
+        {id:4,type:'note',text:'Maya framed onboarding (14 → 25 reps) as a second buying motive.',t:now-41000},
+        {id:5,type:'do',text:'Draft a recap email for this call.',t:now-22000},
+        {id:6,type:'ask',text:'Ask what their current follow-up process costs in hours per week.',t:now-4000},
+      ],
+      messages: [
+        {id:1,role:'agent',text:"Hi — I'm following this call live. Ask me anything, or tap a suggestion to dig in."},
+        {id:2,role:'user',text:'Summarize what Maya cares about so far.'},
+        {id:3,role:'agent',text:"**Maya's priorities so far:**\n\n- **Follow-up time** — her CS team spends too long writing post-call recaps.\n- **Onboarding speed** — scaling `14 → 25` reps this year; ramping new hires fast is a real pain.\n- **Pricing that scales** — she wants a *range* and a growth ramp, not a flat number.\n\nBest next move: anchor on time saved before you say a price."},
+      ],
+    };
+  }
+
+  componentDidMount(){ if(this._mounted) return; this._mounted = true; this.startFeed(); this.clock = setInterval(()=>this.forceUpdate(), 5000); }
+  componentWillUnmount(){ clearInterval(this.feed); clearInterval(this.clock); }
+  rateSecs(){ const r = this.state.rate; return r==='off' ? 0 : parseInt(r,10); }
+  startFeed(){ clearInterval(this.feed); const s = this.rateSecs(); if(!s || this.state.status!=='connected') return; this.feed = setInterval(()=>this.pushSug(), s*1000); }
+  pushSug(){ const p = this._sugPool[this._sugN % this._sugPool.length]; const item = {id:++this._sugN, type:p.type, text:p.text, t:Date.now()}; this.setState(st=>({suggestions:[item, ...st.suggestions].slice(0,40)})); }
+  rel(t){ const s = Math.max(1, Math.round((Date.now()-t)/1000)); if(s<60) return s+'s ago'; const m = Math.round(s/60); if(m<60) return m+'m ago'; return Math.round(m/60)+'h ago'; }
+
+  setView = v => this.setState({view:v});
+  setDir = d => this.setState({dir:d});
+  stop = () => { this.setState({status:'idle'}); clearInterval(this.feed); };
+  connectMeeting = () => { this.setState({status:'connecting', meetingsOpen:false}); setTimeout(()=>{ this.setState({status:'connected'}); this.startFeed(); }, 1300); };
+  toggleMeetings = () => this.setState(st=>({meetingsOpen:!st.meetingsOpen}));
+  refreshMeetings = () => this.forceUpdate();
+  openConfig = () => this.setState({configOpen:true, meetingsOpen:false});
+  closeConfig = () => this.setState({configOpen:false});
+  toggleQuestion = () => this.setState(st=>({questionMode:!st.questionMode}));
+  toggleFeedSec = () => this.setState(st=>({sec:{...st.sec, feed:!st.sec.feed}}));
+  toggleChatSec = () => this.setState(st=>({sec:{...st.sec, chat:!st.sec.chat}}));
+  toggleTermSec = () => this.setState(st=>({sec:{...st.sec, terminal:!st.sec.terminal}}));
+  setTab = t => this.setState({tab:t});
+  setFilter = f => this.setState({filter:f, feedExpanded:false});
+  toggleFeedExpand = () => this.setState(st=>({feedExpanded:!st.feedExpanded}));
+  setRate = e => this.setState({rate:e.target.value}, ()=>this.startFeed());
+  selectMode = id => this.setState({mode:id});
+  selectModel = id => this.setState({model:id});
+  toggleFlag = k => this.setState(st=>({flags:{...st.flags, [k]:!st.flags[k]}}));
+  suggestModes = () => this.setState({suggested:[{id:'renewal',l:'Renewal call'},{id:'champion',l:'Champion build'}]});
+  setCustomContext = e => this.setState({customContext:e.target.value});
+  setPasteId = e => this.setState({pasteId:e.target.value});
+  connectPasted = () => this.connectMeeting();
+  toggleRoute = () => this.setState(st=>({routePI:!st.routePI}));
+  setTermInput = e => this.setState({termInput:e.target.value});
+  onTermKey = e => { if(e.key==='Enter'){ e.preventDefault(); this.submitTerm(); } };
+  submitTerm = () => { const v = this.state.termInput.trim(); if(v) this.setState({pendingCmd:v}); };
+  cancelCmd = () => this.setState({pendingCmd:null});
+  confirmCmd = () => {
+    const cmd = this.state.pendingCmd; const prefix = this.state.routePI ? 'pi $ ' : '$ ';
+    this.setState(st=>({termInput:'', pendingCmd:null, termLines:[...st.termLines, {k:'cmd', t:prefix+cmd}]}));
+    setTimeout(()=>{ this.setState(st=>({termLines:[...st.termLines, {k:'out', t:this.fakeOut(cmd)}]})); }, 480);
+  };
+  fakeOut(c){ if(/build/.test(c)) return '✓ build complete in 4.2s'; if(/^ls/.test(c)) return 'acme-discovery.m4a   internal-standup.m4a   notes.md'; if(/git/.test(c)) return 'On branch main · nothing to commit'; return 'done.'; }
+  setChatInput = e => this.setState({chatInput:e.target.value});
+  onChatKey = e => { if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); this.sendChat(); } };
+  sendChat = () => {
+    const v = this.state.chatInput.trim(); if(!v) return; const id = Date.now();
+    this.setState(st=>({messages:[...st.messages, {id, role:'user', text:v}], chatInput:'', thinking:true}));
+    setTimeout(()=>{ this.setState(st=>({thinking:false, messages:[...st.messages, {id:id+1, role:'agent', text:this.fakeReply(v)}]})); }, 1400);
+  };
+  fakeReply(q){ const c = q.replace(/[?.!]+$/,''); return "Quick take on **"+c+"**:\n\n- Frame it around the **CS time saved** first — that's Maya's primary motive.\n- Keep the number anchored to the `14 → 25` rep growth so the future feels handled.\n\nWant me to draft the message?"; }
+  copyTranscript = () => { try{ navigator.clipboard.writeText(this.PARAS.map(p=>p.name+': '+p.text).join('\n\n')); }catch(e){} };
+  exportMd = () => {};
+
+  setSplitRef = el => { this.splitEl = el; };
+  startDrag = e => {
+    e.preventDefault();
+    const move = ev => { if(!this.splitEl) return; const r = this.splitEl.getBoundingClientRect(); let ratio = (ev.clientX - r.left)/r.width; ratio = Math.min(0.74, Math.max(0.34, ratio)); this.setState({splitRatio:ratio}); };
+    const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); document.body.style.cursor=''; document.body.style.userSelect=''; };
+    document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+    document.body.style.cursor='col-resize'; document.body.style.userSelect='none';
+  };
+
+  // ---- markdown ----
+  mdToHtml(src){
+    if(!src) return '';
+    const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    const inl = t => esc(t)
+      .replace(/`([^`]+)`/g,'<code style="font-family:JetBrains Mono,monospace;font-size:.85em;background:oklch(0.95 0.012 250);padding:2px 6px;border-radius:5px;color:var(--ac-text,oklch(0.45 0.17 242))">$1</code>')
+      .replace(/\*\*([^*]+)\*\*/g,'<strong style="font-weight:700;color:oklch(0.24 0.02 255)">$1</strong>')
+      .replace(/\*([^*]+)\*/g,'<em>$1</em>');
+    const lines = src.split('\n'); let out=''; let mode=null; let code='';
+    const close = () => { if(mode==='ul') out+='</ul>'; if(mode==='ol') out+='</ol>'; if(mode==='ul'||mode==='ol') mode=null; };
+    for(let i=0;i<lines.length;i++){
+      let ln = lines[i];
+      if(/^```/.test(ln)){ if(mode==='code'){ out+='<pre style="font-family:JetBrains Mono,monospace;font-size:12.5px;background:oklch(0.96 0.008 250);padding:12px 14px;border-radius:10px;overflow-x:auto;margin:8px 0">'+esc(code)+'</pre>'; mode=null; code=''; } else { close(); mode='code'; code=''; } continue; }
+      if(mode==='code'){ code += (code?'\n':'')+ln; continue; }
+      let h = ln.match(/^(#{1,3})\s+(.*)/);
+      if(h){ close(); const lv=h[1].length; const sz = lv===1?'17px':lv===2?'15.5px':'14px'; out+='<div style="font-weight:700;font-size:'+sz+';color:oklch(0.24 0.02 255);margin:'+(out?'12px':'0')+' 0 6px">'+inl(h[2])+'</div>'; continue; }
+      let li = ln.match(/^\s*[-*]\s+(.*)/);
+      if(li){ if(mode!=='ul'){ close(); out+='<ul style="margin:6px 0;padding-left:18px;display:flex;flex-direction:column;gap:5px">'; mode='ul'; } out+='<li>'+inl(li[1])+'</li>'; continue; }
+      let ol = ln.match(/^\s*\d+\.\s+(.*)/);
+      if(ol){ if(mode!=='ol'){ close(); out+='<ol style="margin:6px 0;padding-left:18px;display:flex;flex-direction:column;gap:5px">'; mode='ol'; } out+='<li>'+inl(ol[1])+'</li>'; continue; }
+      if(ln.trim()===''){ close(); continue; }
+      close(); out+='<p style="margin:0 0 8px;line-height:1.65">'+inl(ln)+'</p>';
+    }
+    close();
+    return out;
+  }
+
+  // ---- style helpers ----
+  segBtn(active){ return {display:'inline-flex',alignItems:'center',gap:'8px',padding:'9px 15px',borderRadius:'10px',border:'none',fontFamily:'inherit',fontSize:'13.5px',fontWeight:600,cursor:'pointer',whiteSpace:'nowrap',transition:'all .15s', background: active?'#fff':'transparent', color: active?'oklch(0.27 0.025 255)':'oklch(0.5 0.02 255)', boxShadow: active?'0 1px 2px rgba(16,24,40,.12)':'none'}; }
+  tabBtn(active){ return {flex:'1 1 0',display:'inline-flex',alignItems:'center',justifyContent:'center',gap:'8px',padding:'10px',borderRadius:'9px',border:'none',fontFamily:'inherit',fontSize:'13.5px',fontWeight:600,cursor:'pointer',transition:'all .15s', background: active?'#fff':'transparent', color: active?'oklch(0.27 0.025 255)':'oklch(0.52 0.02 255)', boxShadow: active?'0 1px 2px rgba(16,24,40,.12)':'none'}; }
+  modeChip(active){ const C=this.C; return {display:'inline-flex',alignItems:'center',gap:'7px',padding:'11px 16px',borderRadius:'11px',fontFamily:'inherit',fontSize:'13.5px',fontWeight:600,lineHeight:1,cursor:'pointer',whiteSpace:'nowrap',transition:'all .15s', border:'1px solid '+(active?C.border:'oklch(0.91 0.006 255)'), background: active?C.tint:'#fff', color: active?C.text:'oklch(0.4 0.02 255)'}; }
+  filterChip(active){ const C=this.C; return {display:'inline-flex',alignItems:'center',gap:'7px',padding:'8px 15px',borderRadius:'999px',fontFamily:'inherit',fontSize:'12.5px',fontWeight:700,cursor:'pointer',transition:'all .15s', border:'1px solid '+(active?C.border:'oklch(0.92 0.006 255)'), background: active?C.tint:'#fff', color: active?C.text:'oklch(0.5 0.02 255)'}; }
+  countBadge(active){ const C=this.C; return {fontSize:'11px',fontWeight:700,padding:'1px 7px',borderRadius:'999px', background: active?'#fff':'oklch(0.96 0.005 250)', color: active?C.text:'oklch(0.55 0.015 255)'}; }
+  modelRow(active){ const C=this.C; return {display:'flex',alignItems:'center',justifyContent:'space-between',gap:'10px',width:'100%',padding:'13px 16px',borderRadius:'12px',fontFamily:'inherit',fontSize:'14px',fontWeight:600,cursor:'pointer',textAlign:'left',transition:'all .15s', border:'1px solid '+(active?C.border:'oklch(0.92 0.006 255)'), background: active?C.tint:'#fff', color: active?C.text:'oklch(0.32 0.018 255)'}; }
+  track(active){ const C=this.C; return {position:'relative',display:'inline-block',width:'42px',height:'24px',borderRadius:'999px',flex:'0 0 auto',transition:'background .18s', background: active?C.ac:'oklch(0.87 0.006 255)'}; }
+  knob(active){ return {position:'absolute',top:'3px',left: active?'21px':'3px',width:'18px',height:'18px',borderRadius:'50%',background:'#fff',transition:'left .18s',boxShadow:'0 1px 3px rgba(16,24,40,.3)'}; }
+  dirBtn(active){ return {padding:'7px 14px',borderRadius:'8px',border:'none',fontFamily:'inherit',fontSize:'12.5px',fontWeight:700,cursor:'pointer',transition:'all .15s', background: active?'#fff':'transparent', color: active?'oklch(0.27 0.025 255)':'oklch(0.72 0.01 250)'}; }
+
+  renderVals(){
+    const s = this.state; const C = this.PALETTES[s.accent] || this.PALETTES.Azure; this.C = C;
+    const isSplit = s.view==='split', isChat = s.view==='chat', isTranscript = s.view==='transcript';
+    const isStacked = s.dir==='stacked', isTabbed = s.dir==='tabbed';
+    const isConnected = s.status==='connected', isConnecting = s.status==='connecting', isIdle = s.status==='idle';
+    const statusColor = isConnected?'oklch(0.68 0.16 155)':isConnecting?'oklch(0.78 0.14 75)':'oklch(0.7 0.01 250)';
+    const statusLabel = isConnected?'Connected':isConnecting?'Connecting…':'Idle';
+
+    const pct = Math.round(s.splitRatio*1000)/10 + '%';
+    const leftColStyle = isSplit ? {flex:'0 0 '+pct, minWidth:0, display:'flex'} : {flex:'1 1 auto', minWidth:0, display:'flex'};
+    const rightColStyle = {flex:'1 1 0', minWidth:'380px', display:'flex'};
+
+    // suggestions
+    const filtered = s.suggestions.filter(x => s.filter==='all' ? true : x.type===s.filter);
+    const limit = s.feedExpanded ? filtered.length : 4;
+    const counts = {ask:0,do:0,note:0}; s.suggestions.forEach(x=>counts[x.type]++);
+    const visibleSuggestions = filtered.slice(0, limit).map(x=>{ const m=this.SUGMETA[x.type]; return {...x, kind:m.kind, iconHref:m.icon, color:m.color, bg:m.bg, rel:this.rel(x.t), tap:()=>this.setView('chat')}; });
+    const hasMore = filtered.length > 4;
+    const moreLabel = s.feedExpanded ? 'Show less' : ('Show '+(filtered.length-4)+' more');
+
+    const termColor = {system:'oklch(0.7 0.02 250)', stdout:'oklch(0.92 0.01 240)', out:'oklch(0.85 0.04 155)', stderr:'oklch(0.72 0.16 25)', cmd:C.tint};
+    const termLines = s.termLines.map(l=>({...l, color: l.k==='cmd' ? 'oklch(0.82 0.09 242)' : (termColor[l.k]||'oklch(0.9 0.01 240)') }));
+
+    const messages = s.messages.map(m=> m.role==='agent' ? {...m, html:{__html:this.mdToHtml(m.text)}} : m);
+
+    const flagsCount = Object.values(s.flags).filter(Boolean).length;
+    const modeLabel = (this.MODES.find(m=>m.id===s.mode)||{}).l || 'Custom';
+    let modelLabel=''; this.MODELS.forEach(g=>g.items.forEach(i=>{ if(i.id===s.model) modelLabel=i.l; }));
+
+    // feed / chat / term visibility per direction
+    const feedVisible = isStacked || (isTabbed && s.tab==='feed');
+    const chatVisible = isStacked || (isTabbed && s.tab==='chat');
+    const termVisible = isStacked || (isTabbed && s.tab==='terminal');
+    const feedOpen = isStacked ? s.sec.feed : true;
+    const chatOpen = isStacked ? s.sec.chat : true;
+    const termOpen = isStacked ? s.sec.terminal : true;
+
+    return {
+      rootStyle: {'--ac':C.ac,'--ac-hover':C.hover,'--ac-tint':C.tint,'--ac-tint2':C.tint2,'--ac-border':C.border,'--ac-text':C.text, minHeight:'100vh', width:'100%', padding:'28px', background:'radial-gradient(1200px 600px at 78% -8%, '+C.tint+', transparent 60%), oklch(0.975 0.006 250)', overflow:'auto'},
+
+      isSplit, isChat, isTranscript, showTranscript: !isChat,
+      isStacked, isTabbed,
+      isConnected, isConnecting, isIdle, statusColor, statusLabel,
+      leftColStyle, rightColStyle, setSplitRef:this.setSplitRef, startDrag:this.startDrag,
+
+      views: this.VIEWS.map(v=>({...v, iconHref:v.ic, style:this.segBtn(s.view===v.id), on:()=>this.setView(v.id)})),
+      dirs: [{id:'stacked',l:'Stacked'},{id:'tabbed',l:'Tabbed'}].map(d=>({...d, style:this.dirBtn(s.dir===d.id), on:()=>this.setDir(d.id)})),
+      tabs: [{id:'feed',l:'Live feed',ic:'#i-bulb'},{id:'chat',l:'Chat',ic:'#i-message'},{id:'terminal',l:'Terminal',ic:'#i-terminal'}].map(t=>({...t, iconHref:t.ic, style:this.tabBtn(s.tab===t.id), on:()=>this.setTab(t.id)})),
+
+      stop:this.stop, openConfig:this.openConfig, closeConfig:this.closeConfig, configOpen:s.configOpen,
+      meetingsOpen:s.meetingsOpen, toggleMeetings:this.toggleMeetings, refreshMeetings:this.refreshMeetings,
+      meetings: this.MEETINGS.map(m=>({...m, connect:this.connectMeeting})),
+      pasteId:s.pasteId, setPasteId:this.setPasteId, connectPasted:this.connectPasted,
+
+      meetingTitle:'Acme Corp · Discovery',
+      questionMode:s.questionMode, toggleQuestion:this.toggleQuestion,
+      qBtnStyle: s.questionMode
+        ? {display:'inline-flex',alignItems:'center',gap:'8px',padding:'10px 16px',borderRadius:'11px',border:'1px solid '+C.border,background:C.tint,color:C.text,fontFamily:'inherit',fontSize:'13.5px',fontWeight:700,cursor:'pointer',transition:'all .15s'}
+        : {display:'inline-flex',alignItems:'center',gap:'8px',padding:'10px 16px',borderRadius:'11px',border:'1px solid oklch(0.91 0.006 255)',background:'#fff',color:'oklch(0.42 0.02 255)',fontFamily:'inherit',fontSize:'13.5px',fontWeight:600,cursor:'pointer',transition:'all .15s'},
+      qBannerHtml: {__html:this.mdToHtml("**Acknowledge the budget question, then reframe around value before the number.**\n\n*\u201cGreat question — let me give you a range and how it scales as you grow.\u201d* Anchor on the CS time saved across `14 → 25` reps, then offer the growth ramp so the future feels handled.")},
+      copyTranscript:this.copyTranscript, exportMd:this.exportMd,
+      paragraphs:this.PARAS,
+      emptySteps:[
+        {iconHref:'#i-search', title:'Auto-detect active meetings', body:'Your live Fireflies sessions appear here — no setup needed.'},
+        {iconHref:'#i-plug', title:'Pick one and hit Connect', body:'One click streams the transcript here in real time.'},
+        {iconHref:'#i-command', title:'Or paste a meeting ID', body:'Grab it from app.fireflies.ai/view/ID, then connect.'},
+      ],
+
+      // config summary
+      modeLabel, modelLabel, flagsCount,
+
+      // feed
+      feedVisible, feedOpen, toggleFeedSec:this.toggleFeedSec, feedChevron: s.sec.feed?'#i-up':'#i-down',
+      totalCount: s.suggestions.length,
+      rate:s.rate, setRate:this.setRate,
+      filters: this.FILTERS.map(f=>{ const active=s.filter===f.id; const cnt = f.id==='all'?s.suggestions.length:counts[f.id]; return {...f, style:this.filterChip(active), on:()=>this.setFilter(f.id), showCount: f.id!=='all', count:cnt, countStyle:this.countBadge(active)}; }),
+      visibleSuggestions, hasMore, moreLabel, toggleFeedExpand:this.toggleFeedExpand,
+      feedEmpty: filtered.length===0,
+
+      // chat
+      chatVisible, chatOpen, toggleChatSec:this.toggleChatSec, chatChevron: s.sec.chat?'#i-up':'#i-down',
+      aiOffline:false,
+      messages, thinking:s.thinking,
+      chatInput:s.chatInput, setChatInput:this.setChatInput, onChatKey:this.onChatKey, sendChat:this.sendChat,
+      chatSecGrow:'', chatBodyGrow:'', chatScrollStyle: isStacked ? {maxHeight:'420px',overflowY:'auto',paddingRight:'4px'} : {maxHeight:'440px',overflowY:'auto',paddingRight:'4px'},
+
+      // terminal
+      termVisible, termOpen, toggleTermSec:this.toggleTermSec, termChevron: s.sec.terminal?'#i-up':'#i-down',
+      termLines, termInput:s.termInput, setTermInput:this.setTermInput, onTermKey:this.onTermKey, submitTerm:this.submitTerm,
+      pendingCmd:s.pendingCmd, pendingPrefix: s.routePI?'pi $ ':'$ ', confirmCmd:this.confirmCmd, cancelCmd:this.cancelCmd,
+      routePI:s.routePI, toggleRoute:this.toggleRoute, routeTrack:this.track(s.routePI), routeKnob:this.knob(s.routePI),
+
+      // dividers between stacked sections
+      showDivider1: isStacked, showDivider2: isStacked,
+
+      // config slide-over
+      modeChips: this.MODES.map(m=>({...m, style:this.modeChip(s.mode===m.id), on:()=>this.selectMode(m.id)})),
+      suggestedChips: s.suggested.map(m=>({...m, style:this.modeChip(s.mode===m.id), on:()=>this.selectMode(m.id)})),
+      suggestModes:this.suggestModes,
+      customContext:s.customContext, setCustomContext:this.setCustomContext,
+      modelGroups: this.MODELS.map(g=>({p:g.p, items:g.items.map(i=>({...i, active:s.model===i.id, style:this.modelRow(s.model===i.id), on:()=>this.selectModel(i.id)}))})),
+      flagChips: this.FLAGS.map(f=>({...f, on:()=>this.toggleFlag(f.k), track:this.track(s.flags[f.k]), knob:this.knob(s.flags[f.k])})),
+    };
+  }
+}
+</script>
+</body>
+</html>
