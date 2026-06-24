@@ -5,7 +5,7 @@ import {
   Mic, Play, Square, Send, Copy, Check, Lightbulb, Command,
   ChevronDown, ChevronUp, MessageSquare, RefreshCw, HelpCircle, Zap, Eye,
   Sparkles, Settings2, Radio, Columns, FileText, Cpu, Plug, Search,
-  X, Wand2, ArrowRight, Gauge,
+  X, Wand2, ArrowRight, Gauge, Terminal, Download, AlertTriangle,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -287,8 +287,19 @@ export default function App() {
   const [liveAnswer, setLiveAnswer] = useState("");
   const [proposedModes, setProposedModes] = useState<{ label: string; context: string }[]>([]);
   const [proposingModes, setProposingModes] = useState(false);
+  // Backend bridge (localhost command runner / PI delegation)
+  const [bridgeOnline, setBridgeOnline] = useState(false);
+  const [termInput, setTermInput] = useState("");
+  const [termLines, setTermLines] = useState<{ stream: "out" | "err" | "sys"; text: string }[]>([]);
+  const [termRunning, setTermRunning] = useState(false);
+  const [usePI, setUsePI] = useState(false);
+  const [piCmd, setPiCmd] = useState("pi");
+  const [pendingCmd, setPendingCmd] = useState<string | null>(null);
+  const termScrollRef = useRef<HTMLDivElement>(null);
   // Presentation-only: Active Meetings popover open/closed (no data/logic).
   const [meetingsOpen, setMeetingsOpen] = useState(false);
+  // Presentation-only: Backend Terminal · PI section open/closed.
+  const [showTerminal, setShowTerminal] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null); const chatScrollRef = useRef<HTMLDivElement>(null);
   const connRef = useRef<{ connect: () => Promise<void>; disconnect: () => void } | null>(null);
   const lastSpeakerRef = useRef(""); const lineCounter = useRef(0); const lastSuggestRef = useRef(0); const lastAnswerRef = useRef(0);
@@ -296,6 +307,14 @@ export default function App() {
   useEffect(() => { fetch("/api/fireflies-key").then(r => r.json()).then(d => { if (d.ffKey) setFfKey(d.ffKey); if (d.orKey) setOrKey(d.orKey); }).catch(() => {}); }, []);
   useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" }); }, [lines]);
   useEffect(() => { chatScrollRef.current?.scrollTo({ top: chatScrollRef.current.scrollHeight, behavior: "smooth" }); }, [chatMessages]);
+  useEffect(() => { termScrollRef.current?.scrollTo({ top: termScrollRef.current.scrollHeight }); }, [termLines]);
+  // Poll the local bridge so the UI can show online/offline (it only runs while the dev server is up).
+  useEffect(() => {
+    let alive = true;
+    const ping = () => fetch("/bridge/health").then(r => r.ok).then(ok => { if (alive) setBridgeOnline(ok); }).catch(() => { if (alive) setBridgeOnline(false); });
+    ping(); const id = setInterval(ping, 5000);
+    return () => { alive = false; clearInterval(id); };
+  }, []);
 
   const loadMeetings = async () => {
     if (!ffKey) return; setLoadingMeetings(true); setMeetingStatus("");
@@ -397,6 +416,34 @@ export default function App() {
     window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp);
   };
 
+  // Bridge: build the command (raw shell or routed through PI), confirm, then stream output.
+  const buildBridgeCmd = (input: string) => usePI ? `${piCmd} ${JSON.stringify(input)}` : input;
+  const requestRun = () => { if (!termInput.trim() || termRunning) return; setPendingCmd(buildBridgeCmd(termInput.trim())); };
+  const cancelPending = () => setPendingCmd(null);
+  const confirmRun = async () => {
+    const cmd = pendingCmd; setPendingCmd(null);
+    if (!cmd) return;
+    setTermInput(""); setTermRunning(true);
+    setTermLines(prev => [...prev, { stream: "sys", text: `$ ${cmd}` }]);
+    try {
+      const res = await fetch("/bridge/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cmd }) });
+      const reader = res.body!.getReader(); const dec = new TextDecoder(); let buf = "";
+      for (;;) {
+        const { value, done } = await reader.read(); if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const parts = buf.split("\n"); buf = parts.pop() || "";
+        for (const p of parts) {
+          if (!p.trim()) continue;
+          let m: any; try { m = JSON.parse(p); } catch { continue; }
+          if (m.type === "out") setTermLines(prev => [...prev, { stream: "out", text: m.data }]);
+          else if (m.type === "err") setTermLines(prev => [...prev, { stream: "err", text: m.data }]);
+          else if (m.type === "exit") setTermLines(prev => [...prev, { stream: "sys", text: `[exit ${m.code}]` }]);
+        }
+      }
+    } catch (e: any) { setTermLines(prev => [...prev, { stream: "err", text: "Bridge unreachable: " + (e?.message || "error") }]); }
+    setTermRunning(false);
+  };
+
   const handleSuggestion = async (s: Suggestion) => {
     if (!orKey) return; setAiLoading(true);
     const ctx = getCtx();
@@ -418,6 +465,22 @@ export default function App() {
 
   const copyTx = () => { navigator.clipboard.writeText(grouped.map(l => `[${l.speaker}]: ${l.text}`).join("\n")); setCopiedId("tx"); setTimeout(() => setCopiedId(null), 2000); };
 
+  // Export the whole session (transcript + suggestions + chat) to a Markdown file.
+  const exportMarkdown = () => {
+    const md = [
+      `# ${selectedMeeting?.title || "Meeting"}`,
+      `\n## Transcript\n`,
+      grouped.map(l => `**${l.speaker}:** ${l.text}`).join("\n\n") || "_No transcript._",
+      `\n## Suggestions\n`,
+      suggestions.map(s => `- _${s.type}_ — ${s.text}`).join("\n") || "_None._",
+      `\n## Assistant chat\n`,
+      chatMessages.map(m => `**${m.role === "user" ? "You" : "AI"}:** ${m.text}`).join("\n\n") || "_None._",
+    ].join("\n");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([md], { type: "text/markdown" }));
+    a.download = `fireflies-${Date.now()}.md`; a.click(); URL.revokeObjectURL(a.href);
+  };
+
   const cats = ["all", ...new Set(QUICK_ACTIONS.map(a => a.category))];
   const filtered = activeCategory === "all" ? QUICK_ACTIONS : QUICK_ACTIONS.filter(a => a.category === activeCategory);
   const dot = status === "connected" ? "bg-emerald-500" : status === "connecting" ? "bg-amber-500" : status === "error" ? "bg-rose-500" : "bg-text-muted/50";
@@ -438,9 +501,9 @@ export default function App() {
 
   // ── Question-mode "Say this" live banner ───────────────────────
   const sayThisBanner = questionMode && liveAnswer && (
-    <div className="px-9 lg:px-12 pt-8">
+    <div className="px-10 lg:px-14 pt-8">
       <div className="animate-live-glow rounded-2xl border border-accent/30 bg-accent-dim/60 backdrop-blur-sm overflow-hidden">
-        <div className="flex items-center gap-3 px-7 pt-5 pb-1.5">
+        <div className="flex items-center gap-3 px-8 pt-6 pb-2">
           <span className="relative flex w-2.5 h-2.5">
             <span className="absolute inline-flex w-full h-full rounded-full bg-accent opacity-60 animate-ping" />
             <span className="relative inline-flex rounded-full w-2.5 h-2.5 bg-accent" />
@@ -449,7 +512,7 @@ export default function App() {
           <ArrowRight size={13} className="text-accent" />
           <span className="text-[11px] text-text-muted font-medium ml-auto">live suggested reply</span>
         </div>
-        <div className="px-7 pb-6 pt-2 text-text-primary">
+        <div className="px-8 pb-7 pt-3 text-text-primary">
           <Markdown text={liveAnswer} />
         </div>
       </div>
@@ -459,13 +522,13 @@ export default function App() {
   // ── Transcription column ───────────────────────────────────────
   const transcriptColumn = (
     <main className="flex flex-col min-w-0 flex-1 h-full">
-      <div className="h-20 border-b border-border flex items-center justify-between px-9 lg:px-12 shrink-0">
-        <div className="flex items-center gap-3.5 min-w-0">
+      <div className="h-24 border-b border-border flex items-center justify-between px-10 lg:px-14 shrink-0">
+        <div className="flex items-center gap-4 min-w-0">
           <Mic size={16} className="text-accent shrink-0" />
           <span className="text-[14px] font-semibold text-text-primary tracking-tight">Live transcription</span>
-          {selectedMeeting && <span className="text-[12px] text-text-muted font-medium truncate max-w-[260px] pl-3.5 ml-1 border-l border-border">{selectedMeeting.title || selectedMeeting.id.slice(-8)}</span>}
+          {selectedMeeting && <span className="text-[12px] text-text-muted font-medium truncate max-w-[260px] pl-4 ml-1 border-l border-border">{selectedMeeting.title || selectedMeeting.id.slice(-8)}</span>}
         </div>
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex items-center gap-3.5 shrink-0">
           <button
             onClick={() => setQuestionMode(!questionMode)}
             data-active={questionMode}
@@ -474,10 +537,11 @@ export default function App() {
             <Sparkles size={13} /> Question mode
           </button>
           <button onClick={copyTx} title="Copy transcript" className="btn btn-ghost btn-icon shrink-0">{copiedId === "tx" ? <Check size={16} className="text-success" /> : <Copy size={16} />}</button>
+          <button onClick={exportMarkdown} title="Export session as Markdown" className="btn btn-ghost btn-icon shrink-0"><Download size={16} /></button>
         </div>
       </div>
       {sayThisBanner}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-9 lg:px-12 py-10 space-y-2">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-10 lg:px-14 py-12 space-y-3">
         {lines.length === 0 && (
           <div className="flex items-center justify-center h-full">
             <div className="text-center max-w-[480px] w-full px-4">
@@ -488,22 +552,22 @@ export default function App() {
               <p className="text-[13px] text-text-muted mt-3 leading-relaxed max-w-[400px] mx-auto">
                 We auto-detect your active Fireflies meetings. Pick one and hit Connect — or paste a meeting ID to jump straight in.
               </p>
-              <div className="mt-10 grid gap-4 text-left">
-                <div className="card-soft flex items-start gap-4 p-6">
+              <div className="mt-10 grid gap-5 text-left">
+                <div className="card-soft flex items-start gap-5 p-7">
                   <span className="grid place-items-center w-10 h-10 shrink-0 rounded-xl bg-accent-dim text-accent"><Search size={17} /></span>
                   <div>
                     <p className="text-[13px] font-semibold text-text-primary">Auto-detect active meetings</p>
                     <p className="text-[12px] text-text-muted mt-1.5 leading-relaxed">Your live sessions appear in the panel — no setup needed.</p>
                   </div>
                 </div>
-                <div className="card-soft flex items-start gap-4 p-6">
+                <div className="card-soft flex items-start gap-5 p-7">
                   <span className="grid place-items-center w-10 h-10 shrink-0 rounded-xl bg-accent-dim text-accent"><Plug size={17} /></span>
                   <div>
                     <p className="text-[13px] font-semibold text-text-primary">Pick one &amp; hit Connect</p>
                     <p className="text-[12px] text-text-muted mt-1.5 leading-relaxed">One click streams the transcript here in real time.</p>
                   </div>
                 </div>
-                <div className="card-soft flex items-start gap-4 p-6">
+                <div className="card-soft flex items-start gap-5 p-7">
                   <span className="grid place-items-center w-10 h-10 shrink-0 rounded-xl bg-accent-dim text-accent"><Command size={17} /></span>
                   <div>
                     <p className="text-[13px] font-semibold text-text-primary">Or paste a meeting ID</p>
@@ -517,7 +581,7 @@ export default function App() {
           </div>
         )}
         {grouped.map(l => (
-          <div key={l.id} className="animate-fade-in group flex items-baseline gap-6 py-3 px-4 -mx-4 rounded-xl hover:bg-surface-2/60 transition-colors">
+          <div key={l.id} className="animate-fade-in group flex items-baseline gap-7 py-4 px-5 -mx-5 rounded-xl hover:bg-surface-2/60 transition-colors">
             <span className={`text-[12px] font-semibold shrink-0 w-[136px] text-right tracking-tight ${speakerColor(l.speaker)}`}>{l.speaker}</span>
             <span className="text-[15px] text-text-primary leading-relaxed">{l.text}{!l.isFinal && <span className="inline-block w-[2px] h-4 bg-accent ml-1 animate-cursor align-middle rounded-full" />}</span>
           </div>
@@ -528,13 +592,13 @@ export default function App() {
 
   // ── Config / context panel ─────────────────────────────────────
   const configPanel = (
-    <div className="border-b border-border px-7 py-8 space-y-8">
+    <div className="border-b border-border px-8 py-9 space-y-9">
       <div className="flex items-center gap-2.5 text-[13px] font-semibold text-text-primary tracking-tight">
         <Settings2 size={15} className="text-accent" /> Agent configuration
       </div>
 
       {/* Agent context modes */}
-      <div className="space-y-3.5">
+      <div className="space-y-4">
         <div className="flex items-center justify-between gap-3">
           <label className="block text-[11px] font-semibold text-text-secondary uppercase tracking-wider">Agent mode</label>
           <button onClick={handleProposeModes} disabled={proposingModes || grouped.length === 0}
@@ -544,7 +608,7 @@ export default function App() {
               : <><Wand2 size={12} /> Suggest from meeting</>}
           </button>
         </div>
-        <div className="flex flex-wrap gap-2.5">
+        <div className="flex flex-wrap gap-3">
           {AGENT_MODES.map(m => (
             <button key={m.label} onClick={() => setAgentContext(m.context)} data-active={agentContext === m.context} className="chip">
               {m.label}
@@ -559,14 +623,14 @@ export default function App() {
         </div>
         <textarea value={agentContext} onChange={e => setAgentContext(e.target.value)} rows={3}
           placeholder="Or write your own: 'You're advising the host; goal is to close the deal. Flag risks and next steps.'"
-          className="field px-4 py-3.5 leading-relaxed resize-none" />
+          className="field px-5 py-4 leading-relaxed resize-none" />
       </div>
 
       {/* AI model */}
       <div className="space-y-2.5">
         <label htmlFor="ai-model" className="flex items-center gap-1.5 text-[11px] font-semibold text-text-secondary uppercase tracking-wider"><Cpu size={12} /> AI model (OpenRouter)</label>
         <select id="ai-model" value={aiModel} onChange={e => setAiModel(e.target.value)}
-          className="field px-4 py-3 cursor-pointer h-12">
+          className="field px-5 py-3 cursor-pointer h-12">
           {[...new Set(AI_MODELS.map(m => m.group))].map(g => (
             <optgroup key={g} label={g}>
               {AI_MODELS.filter(m => m.group === g).map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
@@ -578,15 +642,111 @@ export default function App() {
       {/* Feature flags */}
       <div className="space-y-3">
         <span className="block text-[11px] font-semibold text-text-secondary uppercase tracking-wider">Features</span>
-        <div className="flex flex-wrap gap-2.5">
+        <div className="flex flex-wrap gap-3">
           {(Object.keys(flags) as (keyof FeatureFlags)[]).map(k => (
             <button key={k} onClick={() => setFlags(p => ({ ...p, [k]: !p[k] }))}
-              className={`shrink-0 px-4 py-2 rounded-full text-[11px] font-semibold transition-all cursor-pointer ${flags[k] ? "bg-accent text-white shadow-[0_2px_8px_-2px_var(--color-accent-glow)]" : "bg-surface-2 text-text-muted hover:text-text-secondary"}`}>
+              className={`shrink-0 px-5 py-2.5 rounded-full text-[11px] font-semibold transition-all cursor-pointer ${flags[k] ? "bg-accent text-white shadow-[0_2px_8px_-2px_var(--color-accent-glow)]" : "bg-surface-2 text-text-muted hover:text-text-secondary"}`}>
               {k.replace(/([A-Z])/g, " $1").replace(/^./, s => s.toUpperCase())}
             </button>
           ))}
         </div>
       </div>
+    </div>
+  );
+
+  // ── Backend Terminal · PI (localhost command bridge UI) ────────
+  const terminalPane = (
+    <div className="border-b border-border">
+      <button onClick={() => setShowTerminal(v => !v)}
+        className="w-full h-16 flex items-center justify-between px-7 text-[13px] font-semibold text-text-primary tracking-tight hover:bg-surface-2/60 transition-colors">
+        <div className="flex items-center gap-2.5">
+          <Terminal size={15} className="text-accent" /> Backend Terminal · PI
+          <span className={`bridge-dot ${bridgeOnline ? "online" : "offline"}`} title={bridgeOnline ? "Bridge online" : "Bridge offline"} />
+        </div>
+        <span className="grid place-items-center w-7 h-7 rounded-lg text-text-muted">{showTerminal ? <ChevronUp size={15} /> : <ChevronDown size={15} />}</span>
+      </button>
+
+      {showTerminal && (
+        <div className="px-7 pb-8 space-y-5">
+          {/* Output console */}
+          <div ref={termScrollRef} className="term-screen px-6 py-5 h-[240px] overflow-y-auto space-y-1.5">
+            {termLines.length === 0 ? (
+              <div className="term-empty term-line leading-relaxed">
+                Delegate shell tasks to your machine.{"\n"}Bridge runs on 127.0.0.1.
+              </div>
+            ) : (
+              termLines.map((l, i) => (
+                <div key={i} className={`term-line ${l.stream === "err" ? "term-err" : l.stream === "sys" ? "term-sys" : "term-out"}`}>{l.text}</div>
+              ))
+            )}
+            {termRunning && (
+              <div className="term-sys term-line inline-flex items-center gap-2 pt-1">
+                <RefreshCw size={12} className="animate-spin" /> running…
+              </div>
+            )}
+          </div>
+
+          {/* Confirmation guardrail — prominent, not a tiny link */}
+          {pendingCmd && (
+            <div className="confirm-bar animate-fade-in px-6 py-5 space-y-4">
+              <div className="flex items-center gap-2.5">
+                <AlertTriangle size={15} className="text-amber-600 shrink-0" />
+                <span className="text-[11px] font-bold text-amber-700 uppercase tracking-wider">Confirm command</span>
+              </div>
+              <pre className="font-mono text-[12.5px] text-text-primary bg-surface-1 border border-border rounded-xl px-4 py-3.5 overflow-x-auto whitespace-pre-wrap break-words">{pendingCmd}</pre>
+              <div className="flex items-center gap-3">
+                <button onClick={confirmRun} className="btn btn-primary btn-sm">
+                  <Play size={12} /> Run
+                </button>
+                <button onClick={cancelPending} className="btn btn-secondary btn-sm">
+                  <X size={12} /> Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Input row */}
+          <div className="space-y-3.5">
+            <div className="field flex items-center gap-2.5 pl-4 pr-2.5 py-2.5">
+              <Terminal size={15} className="text-text-muted shrink-0" />
+              <input
+                value={termInput}
+                onChange={e => setTermInput(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && requestRun()}
+                disabled={termRunning || !bridgeOnline}
+                placeholder={usePI ? "Describe a task to delegate…" : "Type a shell command…"}
+                className="flex-1 bg-transparent text-[13px] text-text-primary placeholder-text-muted outline-none font-mono disabled:opacity-50 min-w-0" />
+              <button onClick={requestRun} disabled={termRunning || !bridgeOnline} className="btn btn-primary btn-icon-sm shrink-0" title="Send command">
+                <Send size={15} />
+              </button>
+            </div>
+
+            <div className="flex items-center gap-3 flex-wrap">
+              <button onClick={() => setUsePI(v => !v)} data-active={usePI} className="toggle-pill" title="Route the command through PI instead of running it raw">
+                <span className="toggle-track"><span className="toggle-knob" /></span>
+                Route through PI
+              </button>
+              {usePI && (
+                <div className="field flex items-center gap-2 pl-3.5 pr-2.5 py-2 !w-auto">
+                  <Cpu size={13} className="text-text-muted shrink-0" />
+                  <input
+                    value={piCmd}
+                    onChange={e => setPiCmd(e.target.value)}
+                    placeholder="pi"
+                    className="w-20 bg-transparent text-[12.5px] text-text-primary placeholder-text-muted outline-none font-mono" />
+                </div>
+              )}
+            </div>
+
+            {!bridgeOnline && (
+              <p className="text-[11px] text-text-muted font-medium leading-relaxed flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-text-muted/50 shrink-0" />
+                Bridge offline — start the dev server.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 
@@ -599,7 +759,7 @@ export default function App() {
         {/* Suggestions — live news-feed, newest first, filterable + collapsible */}
         {flags.aiSuggestions && (
           <div className="border-b border-border">
-            <div className="min-h-16 flex items-center justify-between px-7 py-4 gap-4">
+            <div className="min-h-16 flex items-center justify-between px-8 py-5 gap-4">
               <div className="flex items-center text-[13px] font-semibold text-text-primary tracking-tight"><Lightbulb size={15} className="mr-2.5 text-amber-500" /> Live feed</div>
               <label className="flex items-center gap-2 cursor-pointer" title="How often the AI refreshes suggestions">
                 <Gauge size={13} className="text-text-muted" />
@@ -611,7 +771,7 @@ export default function App() {
             </div>
 
             {/* Filter chip row */}
-            <div className="flex items-center gap-2.5 px-7 pb-2">
+            <div className="flex items-center gap-3 px-8 pb-3">
               {SUGG_FILTERS.map(f => {
                 const count = f.value === "all" ? suggestions.length : suggestions.filter(s => s.type === f.value).length;
                 return (
@@ -623,9 +783,18 @@ export default function App() {
               })}
             </div>
 
-            <div className="px-5 pt-2 pb-6 space-y-3">
+            {!orKey && (
+              <div className="px-7 pb-1 pt-1">
+                <span className="offline-note">
+                  <span className="offline-note-dot" />
+                  AI offline — set OPENROUTER_API
+                </span>
+              </div>
+            )}
+
+            <div className="px-6 pt-3 pb-7 space-y-3.5">
               {filteredSuggestions.length === 0 && (
-                <p className="text-[12.5px] text-text-muted px-3 py-2 font-medium leading-relaxed">
+                <p className="text-[12.5px] text-text-muted px-3 py-2.5 font-medium leading-relaxed">
                   {suggestions.length === 0
                     ? "Suggestions stream in here as the conversation evolves — newest on top. Tap one to ask the AI."
                     : "Nothing in this filter yet. Try another, or switch back to All."}
@@ -635,7 +804,7 @@ export default function App() {
                 const st = SUGGESTION_STYLE[s.type];
                 return (
                   <button key={s.id || i} onClick={() => handleSuggestion(s)} disabled={aiLoading}
-                    className={`group w-full ${i === 0 ? "animate-feed-in" : ""} flex items-start gap-4 px-5 py-4 rounded-2xl border text-left transition-all disabled:opacity-40 hover:-translate-y-px active:translate-y-0 active:scale-[0.99] cursor-pointer ${st.bg} ${st.border}`}>
+                    className={`group w-full ${i === 0 ? "animate-feed-in" : ""} flex items-start gap-4 px-6 py-5 rounded-2xl border text-left transition-all disabled:opacity-40 hover:-translate-y-px active:translate-y-0 active:scale-[0.99] cursor-pointer ${st.bg} ${st.border}`}>
                     <div className="relative shrink-0 mt-0.5">
                       <st.icon size={16} className={st.icon_color} />
                       <span className={`absolute -top-1 -right-1 w-2 h-2 rounded-full ring-2 ring-surface-1 ${st.dot}`} />
@@ -671,14 +840,14 @@ export default function App() {
               <span className="grid place-items-center w-7 h-7 rounded-lg text-text-muted">{showPalette ? <ChevronUp size={15} /> : <ChevronDown size={15} />}</span>
             </button>
             {showPalette && (
-              <div className="px-5 pb-6">
-                <div className="flex gap-2.5 mb-4 flex-wrap">
-                  {cats.map(c => <button key={c} onClick={() => setActiveCategory(c)} className={`shrink-0 px-3.5 py-2 rounded-full text-[11px] font-semibold capitalize transition-colors ${activeCategory === c ? "bg-accent text-white" : "bg-surface-2 text-text-muted hover:text-text-secondary"}`}>{c}</button>)}
+              <div className="px-6 pb-7">
+                <div className="flex gap-3 mb-5 flex-wrap">
+                  {cats.map(c => <button key={c} onClick={() => setActiveCategory(c)} className={`shrink-0 px-4 py-2.5 rounded-full text-[11px] font-semibold capitalize transition-colors ${activeCategory === c ? "bg-accent text-white" : "bg-surface-2 text-text-muted hover:text-text-secondary"}`}>{c}</button>)}
                 </div>
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   {filtered.map(a => (
                     <button key={a.id} onClick={() => handleAction(a)} disabled={aiLoading}
-                      className="w-full flex items-center gap-4 px-4 py-3 rounded-xl text-left hover:bg-surface-2 transition-colors group disabled:opacity-40">
+                      className="w-full flex items-center gap-4 px-5 py-3.5 rounded-xl text-left hover:bg-surface-2 transition-colors group disabled:opacity-40">
                       <span className="grid place-items-center w-9 h-9 shrink-0 rounded-xl bg-surface-2 text-base group-hover:bg-accent-dim transition-colors">{a.icon}</span><span className="text-[13px] text-text-secondary font-medium group-hover:text-text-primary transition-colors">{a.label}</span>
                     </button>
                   ))}
@@ -688,23 +857,26 @@ export default function App() {
           </div>
         )}
 
+        {/* Backend Terminal · PI */}
+        {terminalPane}
+
         {/* AI Chat */}
         <div className="flex flex-col">
           <div className="h-16 flex items-center px-7 text-[13px] font-semibold text-text-primary tracking-tight shrink-0">
             <MessageSquare size={15} className="mr-2.5 text-accent" /> {orKey ? "AI Assistant" : "System Chat"}
             {aiLoading && <span className="ml-2.5 inline-flex items-center gap-1.5 text-accent text-[11px] font-medium"><span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />thinking</span>}
           </div>
-          <div ref={chatScrollRef} className="px-6 space-y-5 pb-3">
-            {chatMessages.length === 0 && <p className="text-[12.5px] text-text-muted py-2 px-1 font-medium leading-relaxed">{orKey ? "Tap a suggestion or quick action, or just ask anything about the meeting." : "Chat with the system."}</p>}
+          <div ref={chatScrollRef} className="px-7 space-y-6 pb-4">
+            {chatMessages.length === 0 && <p className="text-[12.5px] text-text-muted py-2.5 px-1 font-medium leading-relaxed">{orKey ? "Tap a suggestion or quick action, or just ask anything about the meeting." : "Chat with the system."}</p>}
             {chatMessages.map(m => (
               <div key={m.id} className={`animate-fade-in flex flex-col ${m.role === "user" ? "items-end" : "items-start"}`}>
                 <div className={`text-[9.5px] font-bold mb-1.5 px-1 tracking-wide uppercase text-text-muted`}>{m.role === "user" ? "You" : "AI assistant"}</div>
                 {m.role === "user" ? (
-                  <div className="md-invert max-w-[88%] px-5 py-3.5 rounded-2xl rounded-br-md bg-accent text-white shadow-[0_4px_16px_-6px_var(--color-accent-glow)]">
+                  <div className="md-invert max-w-[88%] px-6 py-4 rounded-2xl rounded-br-md bg-accent text-white shadow-[0_4px_16px_-6px_var(--color-accent-glow)]">
                     <Markdown text={m.text} />
                   </div>
                 ) : (
-                  <div className="max-w-[92%] px-5 py-4 rounded-2xl rounded-bl-md bg-surface-1 border border-border text-text-primary shadow-[0_2px_14px_-8px_rgba(14,21,37,0.18)]">
+                  <div className="max-w-[92%] px-6 py-5 rounded-2xl rounded-bl-md bg-surface-1 border border-border text-text-primary shadow-[0_2px_14px_-8px_rgba(14,21,37,0.18)]">
                     <Markdown text={m.text} />
                   </div>
                 )}
@@ -713,7 +885,7 @@ export default function App() {
             {aiLoading && (
               <div className="flex flex-col items-start animate-fade-in">
                 <div className="text-[9.5px] font-bold mb-1.5 px-1 tracking-wide uppercase text-text-muted">AI assistant</div>
-                <div className="px-5 py-4 rounded-2xl rounded-bl-md bg-surface-1 border border-border inline-flex items-center gap-1.5">
+                <div className="px-6 py-5 rounded-2xl rounded-bl-md bg-surface-1 border border-border inline-flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
                   <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse [animation-delay:150ms]" />
                   <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse [animation-delay:300ms]" />
@@ -725,8 +897,14 @@ export default function App() {
       </div>
 
       {/* Chat composer — pinned */}
-      <div className="p-6 border-t border-border shrink-0">
-        <div className="field flex gap-2.5 items-center pl-4 pr-2.5 py-2.5">
+      <div className="p-6 border-t border-border shrink-0 space-y-3.5">
+        {!orKey && (
+          <span className="offline-note">
+            <span className="offline-note-dot" />
+            AI offline — set OPENROUTER_API
+          </span>
+        )}
+        <div className="field flex gap-2.5 items-center pl-5 pr-3 py-3">
           <input value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => e.key === "Enter" && handleChat()}
             placeholder={orKey ? "Ask the AI anything..." : "Type a message..."}
             className="flex-1 bg-transparent text-[13px] text-text-primary placeholder-text-muted outline-none font-medium" />
@@ -751,9 +929,9 @@ export default function App() {
       {meetingsOpen && (
         <>
           <div className="fixed inset-0 z-30" onClick={() => setMeetingsOpen(false)} aria-hidden />
-          <div className="popover animate-pop-in absolute right-0 top-[calc(100%+12px)] z-40 w-[420px] max-w-[calc(100vw-3rem)] p-7">
+          <div className="popover animate-pop-in absolute right-0 top-[calc(100%+12px)] z-40 w-[420px] max-w-[calc(100vw-3rem)] p-8">
             {/* header row */}
-            <div className="flex items-center justify-between mb-5">
+            <div className="flex items-center justify-between mb-6">
               <span className="text-[12px] font-semibold text-text-secondary uppercase tracking-wider">Active meetings</span>
               <div className="flex items-center gap-1">
                 <button onClick={loadMeetings} disabled={!ffKey || loadingMeetings} className="btn btn-ghost btn-icon-sm" title="Refresh meetings">
@@ -769,11 +947,11 @@ export default function App() {
                 <RefreshCw size={15} className="animate-spin text-accent" /> Scanning…
               </div>
             ) : activeMeetings.length > 0 ? (
-              <div className="space-y-3 max-h-[320px] overflow-y-auto -mx-1 px-1">
+              <div className="space-y-3.5 max-h-[320px] overflow-y-auto -mx-1 px-1">
                 {activeMeetings.map(m => {
                   const isSel = selectedMeeting?.id === m.id;
                   return (
-                    <div key={m.id} className={`card-soft flex items-center gap-4 p-4 ${isSel ? "ring-2 ring-accent/40" : ""}`}>
+                    <div key={m.id} className={`card-soft flex items-center gap-4 p-5 ${isSel ? "ring-2 ring-accent/40" : ""}`}>
                       <span className="grid place-items-center w-10 h-10 shrink-0 rounded-xl bg-accent-dim text-accent">
                         <span className="relative flex w-2.5 h-2.5"><span className="absolute inline-flex w-full h-full rounded-full bg-accent opacity-60 animate-ping" /><span className="relative inline-flex rounded-full w-2.5 h-2.5 bg-accent" /></span>
                       </span>
@@ -795,9 +973,9 @@ export default function App() {
             )}
 
             {/* manual ID */}
-            <div className="mt-5 pt-5 border-t border-border space-y-2.5">
+            <div className="mt-6 pt-6 border-t border-border space-y-3">
               <span className="block text-[11px] font-semibold text-text-secondary uppercase tracking-wider">Paste a meeting ID</span>
-              <div className="field flex items-center gap-2.5 pl-4 pr-2.5 py-2.5">
+              <div className="field flex items-center gap-2.5 pl-5 pr-3 py-3">
                 <input placeholder="Meeting ID…" value={manualId} onChange={e => setManualId(e.target.value)} onKeyDown={e => e.key === "Enter" && useManualId()}
                   className="flex-1 bg-transparent text-[13px] text-text-primary placeholder-text-muted outline-none font-medium min-w-0" />
                 <button onClick={useManualId} disabled={!manualId.trim()} className="btn btn-secondary btn-sm shrink-0">Set</button>
@@ -824,7 +1002,7 @@ export default function App() {
           {/* Left: brand + status pill (with inline Stop when connected) */}
           <div className="flex items-center gap-4 shrink-0 min-w-0">
             <span className="text-[18px] font-semibold tracking-tight whitespace-nowrap">Fireflies <span className="text-accent">Live</span></span>
-            <div className="flex items-center gap-2 pl-3.5 pr-1.5 h-9 rounded-full bg-surface-1 border border-border shrink-0">
+            <div className="flex items-center gap-2.5 pl-4 pr-2 h-9 rounded-full bg-surface-1 border border-border shrink-0">
               <span className="relative flex items-center justify-center w-2.5 h-2.5">
                 <span className={`w-2.5 h-2.5 rounded-full ${dot} ${status === "connected" ? "animate-pulse-glow" : ""}`} />
               </span>

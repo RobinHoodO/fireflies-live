@@ -439,3 +439,110 @@ body::before {
 .md-invert .md a { color: #fff; border-bottom-color: rgba(255,255,255,0.5); }
 .md-invert .md code { background: rgba(255,255,255,0.16); color: #fff; border-color: rgba(255,255,255,0.22); }
 .md-invert .md li::marker { color: rgba(255,255,255,0.7); }
+
+/* ── Backend Terminal · PI ──────────────────────────────────────
+   A dark-ish monospace console that reads as a "machine" surface
+   against the bright app. Roomy inner padding, generous line gaps. */
+.term-screen {
+  background: #0e1525;
+  border: 1px solid #1f2a44;
+  border-radius: 1rem;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04),
+              0 10px 30px -18px rgba(14, 21, 37, 0.5);
+  font-family: 'Geist Mono', monospace;
+  font-size: 0.78125rem;        /* 12.5px */
+  line-height: 1.7;
+}
+.term-line { white-space: pre-wrap; word-break: break-word; }
+.term-out { color: #e3e8f4; }
+.term-err { color: #fb7185; }
+.term-sys { color: #a5b4fc; }
+.term-empty { color: #7c89a8; }
+
+/* Online / offline status dot for the bridge header */
+.bridge-dot {
+  position: relative;
+  display: inline-flex;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+}
+.bridge-dot.online { background: var(--color-success); box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.16); }
+.bridge-dot.offline { background: var(--color-text-muted); opacity: 0.55; }
+
+/* Prominent confirmation guardrail bar — clearly visible, not a link */
+.confirm-bar {
+  background: var(--color-amber-dim);
+  border: 1px solid rgba(180, 83, 9, 0.3);
+  border-radius: 1rem;
+  box-shadow: 0 8px 24px -16px rgba(180, 83, 9, 0.5);
+}
+
+/* Inline "AI offline" / "Bridge offline" hint — subtle, informative */
+.offline-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.6875rem;          /* 11px */
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--color-text-muted);
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: 0.4375rem 0.875rem;
+}
+.offline-note .offline-note-dot {
+  width: 0.4375rem;
+  height: 0.4375rem;
+  border-radius: 999px;
+  background: var(--color-warning);
+  flex-shrink: 0;
+}
+
+/* Small toggle pill (Route through PI) */
+.toggle-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: 2.5rem;
+  padding: 0 0.875rem;
+  border-radius: 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  color: var(--color-text-secondary);
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+.toggle-pill:hover { color: var(--color-text-primary); border-color: var(--color-border-hover); }
+.toggle-pill[data-active="true"] {
+  color: var(--color-accent);
+  background: var(--color-accent-dim);
+  border-color: rgba(79, 70, 229, 0.3);
+}
+.toggle-pill .toggle-track {
+  position: relative;
+  width: 1.875rem;
+  height: 1.0625rem;
+  border-radius: 999px;
+  background: var(--color-surface-3);
+  transition: background 0.15s ease;
+  flex-shrink: 0;
+}
+.toggle-pill[data-active="true"] .toggle-track { background: var(--color-accent); }
+.toggle-pill .toggle-knob {
+  position: absolute;
+  top: 0.125rem;
+  left: 0.125rem;
+  width: 0.8125rem;
+  height: 0.8125rem;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(14, 21, 37, 0.3);
+  transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.toggle-pill[data-active="true"] .toggle-knob { transform: translateX(0.8125rem); }

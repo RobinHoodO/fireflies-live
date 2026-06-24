@@ -3,6 +3,20 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import fs from 'fs'
 import path from 'path'
+import { spawn } from 'child_process'
+
+// Boot the localhost-only command bridge alongside the dev server so it only
+// exists while Fireflies Live is open. Killed when Vite exits.
+function bridgePlugin() {
+  return {
+    name: 'fireflies-bridge',
+    configureServer() {
+      const child = spawn('node', ['server/bridge.mjs'], { stdio: 'inherit', env: process.env })
+      const kill = () => { try { child.kill() } catch {} }
+      process.on('exit', kill); process.on('SIGINT', () => { kill(); process.exit() }); process.on('SIGTERM', () => { kill(); process.exit() })
+    },
+  }
+}
 
 function firefliesKeyPlugin() {
   return {
@@ -27,5 +41,10 @@ function firefliesKeyPlugin() {
 }
 
 export default defineConfig({
-  plugins: [react(), tailwindcss(), firefliesKeyPlugin()],
+  plugins: [react(), tailwindcss(), firefliesKeyPlugin(), bridgePlugin()],
+  server: {
+    proxy: {
+      '/bridge': { target: 'http://127.0.0.1:8787', changeOrigin: true, rewrite: (p) => p.replace(/^\/bridge/, '') },
+    },
+  },
 })
