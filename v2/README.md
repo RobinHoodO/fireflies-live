@@ -1,26 +1,31 @@
-# Fireflies Live — v2 (interface)
+# Fireflies Live — v2
 
-Phase 1 deliverable: the redesigned interface, **rebuilt from scratch** against the
-design handoff in `docs/design/` (preview + `.dc.html` source + screenshots). This is a
-**clean, self-contained interface** — **no backend wiring**.
+The redesigned interface (Phase 1, rebuilt from scratch against the design handoff in
+`docs/design/`) **wired to the real backend** (Phase 2). The design is unchanged; the
+mock content was removed and replaced with live data.
 
-- **No** Fireflies socket, **no** OpenRouter, **no** localhost bridge.
-- All data is mock (`data.ts`) and every action is local UI state.
-- Faithful to the design's exact tokens, type, spacing, and components
-  (azure accent, Manrope / Space Grotesk / JetBrains Mono, 18px cards, 28px frame inset).
+- **Fireflies** active-meeting detection + live transcription socket (`backend.ts`),
+  with a scripted demo fallback when no API key / meeting is set.
+- **OpenRouter** for live suggestions, the question-mode "Say this" answer, the chat
+  assistant, and "Suggest agent mode from meeting".
+- **Localhost command bridge** (`../server/bridge.mjs`) for the Terminal tab.
+- Keys are injected by the dev server from `/Users/robinsverd/Thrivbe-AI/.env`
+  (`FIREFLY_API_KEY`, `OPENROUTER_API`) via `/api/fireflies-key` — never in client code.
 
 ## Run it
 ```bash
-npx vite --config v2/vite.config.ts        # dev  → http://localhost:5273
+npx vite --config v2/vite.config.ts        # dev  → http://localhost:5173 (boots the bridge too)
 npx vite build --config v2/vite.config.ts  # build
 ```
 
 ## Files
 - `App.tsx` — the whole interface (header, transcript, tabbed sidebar, chat view, config slide-over).
-- `data.ts` — mock data + ported style helpers.
+- `backend.ts` — Fireflies meetings/socket, OpenRouter calls, suggestions, live answers, mode proposal.
+- `data.ts` — static design config + ported style helpers (no mock content).
 - `md.ts` — Markdown→HTML for agent bubbles (ported from the source).
 - `icons.tsx` — the lucide icon sprite.
 - `styles.css` — fonts, keyframes, scrollbar, hover/focus affordances.
+- `vite.config.ts` — standalone config: key injection + bridge boot + `/bridge` proxy.
 
 ## What's faithful to the handoff
 - Card-based shell, 1660px frame, 28px page inset, header card.

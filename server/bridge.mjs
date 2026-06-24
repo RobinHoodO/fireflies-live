@@ -45,12 +45,42 @@ function send(res, obj) {
 const TOKEN = process.env.BRIDGE_TOKEN || "";
 
 // Only forward a minimal, explicit env to spawned commands — never the whole process
-// env (which can carry API keys / secrets).
+// env (which can carry API keys / secrets). The generic /run path gets NO secrets.
 function childEnv() {
   const allow = ["PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "TMPDIR", "TZ", "PWD"];
   const env = {};
   for (const k of allow) if (process.env[k] != null) env[k] = process.env[k];
   return env;
+}
+
+// LLM provider credentials, injected ONLY for the dedicated /pi endpoint (fixed argv,
+// no shell) so the in-app assistant can authenticate. Never reaches arbitrary /run
+// commands, so a chained shell command can't read them.
+const PI_ENV_KEYS = [
+  "GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "ANTHROPIC_API_KEY",
+  "OPENAI_API_KEY", "OPENROUTER_API_KEY", "OPENROUTER_API", "DEEPSEEK_API_KEY",
+  "MINIMAX_API_KEY", "XAI_API_KEY", "MISTRAL_API_KEY", "GROQ_API_KEY", "PI_API_KEY", "PI_OFFLINE",
+];
+function piEnv() {
+  const env = childEnv();
+  for (const k of PI_ENV_KEYS) if (process.env[k] != null) env[k] = process.env[k];
+  return env;
+}
+
+// Stream a spawned child's stdout/stderr/exit to the NDJSON response, with an output
+// cap and hard timeout. Shared by /run and /pi.
+function streamChild(res, child) {
+  let bytes = 0, killed = false;
+  const cap = (chunk) => {
+    bytes += chunk.length;
+    if (bytes > MAX_OUTPUT && !killed) { killed = true; child.kill("SIGKILL"); return "\n[output truncated]\n"; }
+    return chunk.toString();
+  };
+  const timer = setTimeout(() => { killed = true; child.kill("SIGKILL"); }, MAX_MS);
+  child.stdout.on("data", (c) => { if (!killed) send(res, { type: "out", data: cap(c) }); });
+  child.stderr.on("data", (c) => { if (!killed) send(res, { type: "err", data: cap(c) }); });
+  child.on("close", (code) => { clearTimeout(timer); send(res, { type: "exit", code: killed ? 137 : code }); res.end(); });
+  child.on("error", (e) => { clearTimeout(timer); send(res, { type: "err", data: String(e.message) }); send(res, { type: "exit", code: 1 }); res.end(); });
 }
 
 const server = http.createServer((req, res) => {
@@ -101,19 +131,37 @@ const server = http.createServer((req, res) => {
       await appendFile(AUDIT, `${new Date().toISOString()} RUN ${cmd}\n`).catch(() => {});
       send(res, { type: "start", cmd });
 
-      const child = spawn(cmd, { shell: true, env: childEnv() });
-      let bytes = 0, killed = false;
-      const cap = (chunk) => {
-        bytes += chunk.length;
-        if (bytes > MAX_OUTPUT && !killed) { killed = true; child.kill("SIGKILL"); return "\n[output truncated]\n"; }
-        return chunk.toString();
-      };
-      const timer = setTimeout(() => { killed = true; child.kill("SIGKILL"); }, MAX_MS);
+      // Closed stdin ("ignore") so non-interactive tools get EOF instead of blocking
+      // forever on a never-written pipe. childEnv() carries NO secrets.
+      streamChild(res, spawn(cmd, { shell: true, env: childEnv(), stdio: ["ignore", "pipe", "pipe"] }));
+    });
+    return;
+  }
 
-      child.stdout.on("data", (c) => { if (!killed) send(res, { type: "out", data: cap(c) }); });
-      child.stderr.on("data", (c) => { if (!killed) send(res, { type: "err", data: cap(c) }); });
-      child.on("close", (code) => { clearTimeout(timer); send(res, { type: "exit", code: killed ? 137 : code }); res.end(); });
-      child.on("error", (e) => { clearTimeout(timer); send(res, { type: "err", data: String(e.message) }); send(res, { type: "exit", code: 1 }); res.end(); });
+  // Dedicated, locked-down endpoint for the in-app assistant. Fixed argv, NO shell,
+  // so the forwarded provider keys can't be re-read by a chained/injected command.
+  // Body: { message, sessionId }.
+  if (req.method === "POST" && req.url === "/pi") {
+    if (!TOKEN || req.headers.authorization !== `Bearer ${TOKEN}`) {
+      res.writeHead(401, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: "unauthorized" })); return;
+    }
+    if (!String(req.headers["content-type"] || "").includes("application/json")) {
+      res.writeHead(415); res.end("json only"); return;
+    }
+    let body = "";
+    req.on("data", (c) => { body += c; if (body.length > 100_000) req.destroy(); });
+    req.on("end", async () => {
+      let message = "", sessionId = "";
+      try { const j = JSON.parse(body); message = String(j.message || ""); sessionId = String(j.sessionId || ""); } catch {}
+      res.writeHead(200, { "Content-Type": "application/x-ndjson", "Cache-Control": "no-cache" });
+      if (!message.trim()) { send(res, { type: "exit", code: 1, error: "empty message" }); res.end(); return; }
+      // Session id is the only value that lands in argv besides the message; keep it strict.
+      if (!/^[A-Za-z0-9._-]{1,64}$/.test(sessionId)) { send(res, { type: "err", data: "bad session id" }); send(res, { type: "exit", code: 1 }); res.end(); return; }
+
+      await appendFile(AUDIT, `${new Date().toISOString()} PI ${sessionId} ${message.slice(0, 200).replace(/\n/g, " ")}\n`).catch(() => {});
+      send(res, { type: "start", cmd: "pi" });
+      // No shell: args are passed as argv, so the message can never break out to the shell.
+      streamChild(res, spawn("pi", ["--print", "--offline", "--session-id", sessionId, message], { env: piEnv(), stdio: ["ignore", "pipe", "pipe"] }));
     });
     return;
   }

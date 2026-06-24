@@ -1,85 +1,257 @@
-// Fireflies Live — v2 interface (Phase 1).
-// A faithful, self-contained port of the design handoff (docs/design).
-// INTERFACE ONLY — no Fireflies socket, no OpenRouter, no bridge. All data is
-// mock and all actions are local UI state. Phase 2 wires the real backend in.
+// Fireflies Live — v2 interface, Phase 2 (wired).
+// The design/markup is the Phase 1 port of the handoff (docs/design), unchanged.
+// The mock data and local handlers are replaced with the real backend: Fireflies
+// meetings + live socket (demo fallback), OpenRouter suggestions/chat/answers, and
+// the localhost command bridge. See ./backend and v2/vite.config.ts.
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { Icon, IconSprite } from "./icons";
 import { mdToHtml } from "./md";
 import {
-  C, PARAS, MODES, MODELS, FLAGS, MEETINGS, VIEWS, TABS, FILTERS, SUGMETA, SUG_POOL,
-  RATES, EMPTY_STEPS, Q_BANNER_TEXT, INITIAL_MESSAGES, INITIAL_TERM, initialSuggestions,
+  C, MODES, MODELS, FLAGS, VIEWS, TABS, FILTERS, SUGMETA,
+  RATES, EMPTY_STEPS,
   segBtn, tabBtn, modeChip, filterChip, countBadge, modelRow, track, knob, qBtnStyle, rel,
-  type Suggestion, type Message, type TermLine,
+  type Suggestion, type Message,
 } from "./data";
+import {
+  fetchKeys, fetchMeetings, callAI, fetchSuggestions, streamLiveAnswer, streamPI, proposeModes,
+  connectLive, connectDemo, MODE_CONTEXT, type Meeting, type ConnStatus,
+} from "./backend";
+
+// Persisted UI config — survives reloads / new sessions (localStorage).
+const SAVED: any = (() => { try { return JSON.parse(localStorage.getItem("fl-config") || "{}"); } catch { return {}; } })();
 
 const BORDER = "oklch(0.91 0.006 255)";
 const CARD_SHADOW = "0 1px 2px rgba(16,24,40,.04),0 12px 32px -24px rgba(16,24,40,.22)";
 const cardBase: CSSProperties = { display: "flex", flexDirection: "column", background: "#fff", border: `1px solid ${BORDER}`, borderRadius: 18, boxShadow: CARD_SHADOW, overflow: "hidden" };
 const iconBtn: CSSProperties = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: 40, height: 40, border: `1px solid ${BORDER}`, borderRadius: 11, background: "#fff", color: "oklch(0.45 0.02 255)", cursor: "pointer" };
 
-let SUG_N = 100;
+const GREETING_CHAT: Message = { id: 0, role: "agent", text: "Hi — I'm following this call live. Ask me anything about it, or tap an Ask / Do / Note suggestion." };
+const GREETING_PI: Message = { id: 0, role: "agent", text: "● **PI session ready** — read · bash · edit · write tools loaded. Message me, or tap a Command suggestion and it runs right here." };
+
+type Line = { speaker: string; text: string; isFinal: boolean; id: string };
+
+function speakerColor(name: string) {
+  if (name === "You") return C.text;
+  let h = 0; for (let i = 0; i < name.length; i++) h = name.charCodeAt(i) + ((h << 5) - h);
+  return Math.abs(h) % 2 === 0 ? "oklch(0.55 0.16 25)" : "oklch(0.5 0.14 155)";
+}
 
 export default function App() {
-  const [view, setView] = useState<"transcript" | "split" | "chat">("split");
-  const [status, setStatus] = useState<"idle" | "connecting" | "connected">("connected");
+  const [view, setView] = useState<"transcript" | "split" | "chat">(SAVED.view ?? "split");
+  const [status, setStatus] = useState<"idle" | "connecting" | "connected">("idle");
   const [splitRatio, setSplitRatio] = useState(0.6);
-  const [questionMode, setQuestionMode] = useState(true);
+  const [questionMode, setQuestionMode] = useState<boolean>(SAVED.questionMode ?? false);
+  const [answering, setAnswering] = useState(false);
   const [meetingsOpen, setMeetingsOpen] = useState(false);
+  const [meetingsOpenIdle, setMeetingsOpenIdle] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
-  const [tab, setTab] = useState<"feed" | "chat" | "terminal">("feed");
+  const [tab, setTab] = useState<"feed" | "chat" | "pi">("feed");
   const [filter, setFilter] = useState("all");
   const [feedExpanded, setFeedExpanded] = useState(false);
-  const [mode, setMode] = useState("sales");
-  const [model, setModel] = useState("anthropic/claude-sonnet-4");
-  const [flags, setFlags] = useState<Record<string, boolean>>({ autosuggest: true, sentiment: true, actions: true, summary: false, speakers: true, profanity: false });
-  const [suggested, setSuggested] = useState<{ id: string; l: string }[]>([]);
-  const [customContext, setCustomContext] = useState("");
-  const [rate, setRate] = useState("12s");
-  const [routePI, setRoutePI] = useState(false);
-  const [termInput, setTermInput] = useState("");
-  const [pendingCmd, setPendingCmd] = useState<string | null>(null);
+  const [mode, setMode] = useState<string>(SAVED.mode ?? "");
+  const [model, setModel] = useState<string>(SAVED.model ?? "anthropic/claude-sonnet-4");
+  const [flags, setFlags] = useState<Record<string, boolean>>(SAVED.flags ?? { autosuggest: true, sentiment: true, actions: true, summary: false, speakers: true, profanity: false });
+  const [suggested, setSuggested] = useState<{ id: string; l: string; context: string }[]>([]);
+  const [proposing, setProposing] = useState(false);
+  const [customContext, setCustomContext] = useState<string>(SAVED.customContext ?? "");
+  const [rate, setRate] = useState<string>(SAVED.rate ?? "12s");
   const [pasteId, setPasteId] = useState("");
   const [chatInput, setChatInput] = useState("");
   const [thinking, setThinking] = useState(false);
+  const [piInput, setPiInput] = useState("");
+  const [piThinking, setPiThinking] = useState(false);
   const [, force] = useState(0);
-  const [termLines, setTermLines] = useState<TermLine[]>(INITIAL_TERM);
-  const [suggestions, setSuggestions] = useState<Suggestion[]>(() => initialSuggestions(Date.now()));
-  const [messages, setMessages] = useState<Message[]>(INITIAL_MESSAGES);
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [messages, setMessages] = useState<Message[]>([GREETING_CHAT]);
+  const [piMessages, setPiMessages] = useState<Message[]>([GREETING_PI]);
+
+  // backend state
+  const [ffKey, setFfKey] = useState(""); const [orKey, setOrKey] = useState(""); const [bridgeToken, setBridgeToken] = useState("");
+  const [bridgeOnline, setBridgeOnline] = useState(false);
+  const [meetings, setMeetings] = useState<Meeting[]>([]);
+  const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
+  const [loadingMeetings, setLoadingMeetings] = useState(false);
+  const [lines, setLines] = useState<Line[]>([]);
+  const [liveAnswer, setLiveAnswer] = useState("");
+  const [copied, setCopied] = useState(false);
 
   const splitElRef = useRef<HTMLDivElement>(null);
+  const connRef = useRef<{ connect: () => Promise<void>; disconnect: () => void } | null>(null);
+  const lastSpeakerRef = useRef(""); const lineCounter = useRef(0); const lastSuggestRef = useRef(0); const lastAnswerRef = useRef(0);
+  const suggestionsRef = useRef<Suggestion[]>([]); suggestionsRef.current = suggestions;
+  const liveAnswerRef = useRef(""); const sidRef = useRef(1);
+  // Stable PI session id — reused across reloads so PI keeps conversation context.
+  const piSessionRef = useRef<string>(SAVED.piSession || ("fl-" + Math.random().toString(36).slice(2, 10)));
 
-  // suggestion pulse + relative-time tick
-  const rateSecs = rate === "off" ? 0 : parseInt(rate, 10);
+  // Persist config so it's consistent across sessions.
   useEffect(() => {
-    if (!rateSecs || status !== "connected") return;
-    const id = setInterval(() => {
-      const p = SUG_POOL[SUG_N % SUG_POOL.length];
-      const item = { id: ++SUG_N, type: p.type, text: p.text, t: Date.now() };
-      setSuggestions(prev => [item, ...prev].slice(0, 40));
-    }, rateSecs * 1000);
-    return () => clearInterval(id);
-  }, [rateSecs, status]);
+    try { localStorage.setItem("fl-config", JSON.stringify({ view, mode, model, flags, rate, questionMode, customContext, piSession: piSessionRef.current })); } catch { /* storage unavailable */ }
+  }, [view, mode, model, flags, rate, questionMode, customContext]);
+
+  // derived context for the AI: selected mode + any custom note
+  const modeCtx = MODE_CONTEXT[mode] ?? suggested.find(s => s.id === mode)?.context ?? "";
+  const agentContext = [modeCtx, customContext.trim()].filter(Boolean).join(" ");
+
+  const setStatusMapped = (s: ConnStatus) => setStatus(s === "connected" ? "connected" : s === "connecting" ? "connecting" : "idle");
+
+  const grouped = lines.reduce<Line[]>((acc, l) => {
+    const last = acc[acc.length - 1];
+    if (last && last.speaker === l.speaker) acc[acc.length - 1] = { ...last, text: `${last.text} ${l.text}`, isFinal: l.isFinal };
+    else acc.push({ ...l });
+    return acc;
+  }, []);
+  const getCtx = () => grouped.map(l => `[${l.speaker}]: ${l.text}`).join("\n");
+
+  // ── boot: keys, meetings, bridge health ──────────────────────────
+  useEffect(() => { fetchKeys().then(k => { setFfKey(k.ffKey); setOrKey(k.orKey); setBridgeToken(k.bridgeToken); }); }, []);
+  const loadMeetings = async () => {
+    if (!ffKey) return; setLoadingMeetings(true);
+    const { meetings: ms } = await fetchMeetings(ffKey);
+    setMeetings(ms); const a = ms.find(m => m.active); if (a) setSelectedMeeting(a);
+    setLoadingMeetings(false);
+  };
+  useEffect(() => { if (ffKey) loadMeetings(); }, [ffKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    let alive = true;
+    const ping = () => fetch("/bridge/health").then(r => r.ok).then(ok => { if (alive) setBridgeOnline(ok); }).catch(() => { if (alive) setBridgeOnline(false); });
+    ping(); const id = setInterval(ping, 5000);
+    return () => { alive = false; clearInterval(id); };
+  }, []);
   useEffect(() => { const id = setInterval(() => force(n => n + 1), 5000); return () => clearInterval(id); }, []);
 
-  const stop = () => setStatus("idle");
-  const connectMeeting = () => { setStatus("connecting"); setMeetingsOpen(false); setTimeout(() => setStatus("connected"), 1300); };
+  // ── live suggestion pulse ────────────────────────────────────────
+  const rateSecs = rate === "off" ? 0 : parseInt(rate, 10);
+  useEffect(() => {
+    if (!flags.autosuggest || !orKey || lines.length === 0 || !rateSecs || status !== "connected") return;
+    const now = Date.now();
+    if (now - lastSuggestRef.current < rateSecs * 1000) return;
+    lastSuggestRef.current = now;
+    const ctx = lines.map(l => `[${l.speaker}]: ${l.text}`).join("\n");
+    const existing = suggestionsRef.current.slice(0, 10).map(s => ({ id: s.id, type: s.type as any, text: s.text }));
+    fetchSuggestions(ctx, orKey, agentContext, model, existing).then(items => {
+      if (!items.length) return;
+      setSuggestions(prev => {
+        const next = [...prev];
+        for (const it of items) {
+          if (it.id != null) {
+            const idx = next.findIndex(s => s.id === it.id);
+            if (idx >= 0) { next[idx] = { ...next[idx], type: it.type, text: it.text, t: Date.now() }; continue; } // refine in place
+          }
+          if (next.some(s => s.text.toLowerCase() === it.text.toLowerCase())) continue; // skip exact dupe
+          next.unshift({ id: sidRef.current++, type: it.type, text: it.text, t: Date.now() }); // genuinely new
+        }
+        return next.slice(0, 40);
+      });
+    }).catch(() => {});
+  }, [lines, flags, orKey, agentContext, model, rateSecs, status]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── question-mode live answer ────────────────────────────────────
+  useEffect(() => {
+    if (!questionMode || !orKey || lines.length === 0) return;
+    const now = Date.now();
+    if (now - lastAnswerRef.current < 5000) return;
+    lastAnswerRef.current = now;
+    const ctx = lines.slice(-12).map(l => `[${l.speaker}]: ${l.text}`).join("\n");
+    const prev = liveAnswerRef.current;
+    setAnswering(true);
+    streamLiveAnswer(ctx, orKey, agentContext, model, partial => {
+      const p = partial.trim();
+      if (p && p !== "—") setLiveAnswer(p); // show it being formulated live
+    }).then(final => {
+      const f = (final || "").trim();
+      if (!f || f === "—") setLiveAnswer(prev); // nothing to say right now — keep the last draft, don't vanish
+      else { setLiveAnswer(f); liveAnswerRef.current = f; }
+      setAnswering(false);
+    }).catch(() => setAnswering(false));
+  }, [lines, questionMode, orKey, agentContext, model]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── transcript ingest ────────────────────────────────────────────
+  const onTranscriptLine = (speaker: string, text: string, isFinal: boolean, key?: string) => {
+    setLines(prev => {
+      if (key != null) {
+        const idx = prev.findIndex(l => l.id === key);
+        if (idx >= 0) { const u = [...prev]; u[idx] = { ...u[idx], speaker, text, isFinal: true }; return u; }
+        return [...prev, { speaker, text, isFinal: true, id: key }];
+      }
+      if (speaker === lastSpeakerRef.current && prev.length > 0 && !prev[prev.length - 1].isFinal) { const u = [...prev]; u[u.length - 1] = { ...u[u.length - 1], text, isFinal }; return u; }
+      lastSpeakerRef.current = speaker; lineCounter.current++; return [...prev, { speaker, text, isFinal, id: `l${lineCounter.current}` }];
+    });
+  };
+
+  const startConnection = (m?: Meeting) => {
+    const meeting = m ?? selectedMeeting;
+    if (m) setSelectedMeeting(m);
+    setLines([]); setSuggestions([]); setLiveAnswer(""); lastSpeakerRef.current = ""; lineCounter.current = 0;
+    connRef.current = (ffKey && meeting) ? connectLive(onTranscriptLine, setStatusMapped, ffKey, meeting.id) : connectDemo(onTranscriptLine, setStatusMapped);
+    connRef.current.connect();
+    setMeetingsOpen(false);
+  };
+  const connectMeeting = () => {
+    const id = pasteId.trim();
+    const meeting: Meeting | undefined = id ? { id, title: "Manual meeting", sub: "", time: "", active: true } : (selectedMeeting ?? undefined);
+    startConnection(meeting);
+  };
+  const stop = () => connRef.current?.disconnect();
+
   const selectMode = (id: string) => setMode(id);
   const toggleFlag = (k: string) => setFlags(f => ({ ...f, [k]: !f[k] }));
-  const suggestModes = () => setSuggested([{ id: "renewal", l: "Renewal call" }, { id: "champion", l: "Champion build" }]);
-  const submitTerm = () => { const v = termInput.trim(); if (v) setPendingCmd(v); };
-  const fakeOut = (c: string) => /build/.test(c) ? "✓ build complete in 4.2s" : /^ls/.test(c) ? "acme-discovery.m4a   internal-standup.m4a   notes.md" : /git/.test(c) ? "On branch main · nothing to commit" : "done.";
-  const confirmCmd = () => {
-    const cmd = pendingCmd!; const prefix = routePI ? "pi $ " : "$ ";
-    setTermInput(""); setPendingCmd(null);
-    setTermLines(prev => [...prev, { k: "cmd", t: prefix + cmd }]);
-    setTimeout(() => setTermLines(prev => [...prev, { k: "out", t: fakeOut(cmd) }]), 480);
+  const suggestModes = async () => {
+    if (!orKey || grouped.length === 0) return;
+    setProposing(true);
+    try { const ms = await proposeModes(getCtx(), orKey, model); if (ms.length) setSuggested(ms.map((m, i) => ({ id: `p${i}-${m.label}`, l: m.label, context: m.context }))); } catch {}
+    setProposing(false);
   };
-  const fakeReply = (q: string) => { const c = q.replace(/[?.!]+$/, ""); return "Quick take on **" + c + "**:\n\n- Frame it around the **CS time saved** first — that's Maya's primary motive.\n- Keep the number anchored to the `14 → 25` rep growth so the future feels handled.\n\nWant me to draft the message?"; };
-  const sendChat = () => {
-    const v = chatInput.trim(); if (!v) return; const id = Date.now();
-    setMessages(prev => [...prev, { id, role: "user", text: v }]); setChatInput(""); setThinking(true);
-    setTimeout(() => { setThinking(false); setMessages(prev => [...prev, { id: id + 1, role: "agent", text: fakeReply(v) }]); }, 1400);
+
+  // ── Chat (OpenRouter, meeting-aware) ─────────────────────────────
+  const askChat = async (text: string) => {
+    const v = text.trim(); if (!v) return;
+    setTab("chat");
+    const id = Date.now();
+    setMessages(prev => [...prev, { id, role: "user", text: v }]);
+    if (!orKey) { setMessages(prev => [...prev, { id: id + 1, role: "agent", text: "AI offline — set OPENROUTER_API." }]); return; }
+    setThinking(true);
+    try {
+      const resp = await callAI([{ role: "system", content: `You are a meeting assistant. Answer concisely.${agentContext ? ` ${agentContext}` : ""}` }, { role: "user", content: `Transcript:\n${getCtx()}\n\nUser: ${v}` }], orKey, model);
+      setMessages(prev => [...prev, { id: id + 1, role: "agent", text: resp }]);
+    } catch { setMessages(prev => [...prev, { id: id + 1, role: "agent", text: "AI unavailable." }]); }
+    setThinking(false);
   };
+  const sendChat = () => { const v = chatInput.trim(); if (!v) return; setChatInput(""); askChat(v); };
+
+  // ── PI (terminal assistant, streamed via the bridge) ─────────────
+  const sendPI = async (text: string) => {
+    const t = text.trim(); if (!t) return;
+    setTab("pi");
+    const uid = Date.now();
+    setPiMessages(prev => [...prev, { id: uid, role: "user", text: t }]);
+    if (!bridgeOnline) { setPiMessages(prev => [...prev, { id: uid + 1, role: "agent", text: "⚠ PI bridge offline — is the dev server running?" }]); return; }
+    setPiThinking(true);
+    const aid = uid + 1; let started = false;
+    try {
+      await streamPI(t, piSessionRef.current, bridgeToken, partial => {
+        if (!started) { started = true; setPiThinking(false); setPiMessages(prev => [...prev, { id: aid, role: "agent", text: partial }]); }
+        else setPiMessages(prev => prev.map(m => m.id === aid ? { ...m, text: partial } : m));
+      });
+    } catch { setPiMessages(prev => [...prev, { id: aid, role: "agent", text: "⚠ PI unreachable." }]); }
+    if (!started) setPiMessages(prev => [...prev, { id: aid, role: "agent", text: "_(no output)_" }]);
+    setPiThinking(false);
+  };
+  const submitPI = () => { const v = piInput.trim(); if (v) { setPiInput(""); sendPI(v); } };
+
+  // Ask / Do / Note → meeting chat (has transcript context); Command → PI terminal.
+  const handleSuggestion = (s: Suggestion) => {
+    if (s.type === "command") sendPI(s.text);
+    else askChat(s.text);
+  };
+
+  const copyTx = () => { navigator.clipboard.writeText(getCtx()); setCopied(true); setTimeout(() => setCopied(false), 2000); };
+  const exportMd = () => {
+    const md = [`# ${selectedMeeting?.title || "Meeting"}`, `\n## Transcript\n`, grouped.map(l => `**${l.speaker}:** ${l.text}`).join("\n\n") || "_No transcript._", `\n## Chat\n`, messages.map(m => `**${m.role === "user" ? "You" : "AI"}:** ${m.text}`).join("\n\n") || "_None._"].join("\n");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([md], { type: "text/markdown" }));
+    a.download = `fireflies-${Date.now()}.md`; a.click(); URL.revokeObjectURL(a.href);
+  };
+
   const startDrag = (e: React.MouseEvent) => {
     e.preventDefault();
     const move = (ev: MouseEvent) => { const el = splitElRef.current; if (!el) return; const r = el.getBoundingClientRect(); let ratio = (ev.clientX - r.left) / r.width; ratio = Math.min(0.74, Math.max(0.34, ratio)); setSplitRatio(ratio); };
@@ -97,25 +269,25 @@ export default function App() {
 
   const filtered = suggestions.filter(x => filter === "all" ? true : x.type === filter);
   const limit = feedExpanded ? filtered.length : 4;
-  const counts: Record<string, number> = { ask: 0, do: 0, note: 0 }; suggestions.forEach(x => counts[x.type]++);
+  const counts: Record<string, number> = { ask: 0, do: 0, note: 0, command: 0 }; suggestions.forEach(x => counts[x.type]++);
   const visibleSug = filtered.slice(0, limit);
   const hasMore = filtered.length > 4;
   const moreLabel = feedExpanded ? "Show less" : "Show " + (filtered.length - 4) + " more";
 
-  const termColor = (k: string) => k === "cmd" ? "oklch(0.82 0.09 242)" : k === "system" ? "oklch(0.7 0.02 250)" : k === "out" ? "oklch(0.85 0.04 155)" : k === "stderr" ? "oklch(0.72 0.16 25)" : "oklch(0.9 0.01 240)";
   const flagsCount = Object.values(flags).filter(Boolean).length;
-  const modeLabel = MODES.find(m => m.id === mode)?.l || "Custom";
+  const modeLabel = MODES.find(m => m.id === mode)?.l || suggested.find(s => s.id === mode)?.l || "No agent mode";
   let modelLabel = ""; MODELS.forEach(g => g.items.forEach(i => { if (i.id === model) modelLabel = i.l; }));
+  const activeMeetings = meetings.filter(m => m.active);
 
   const rootStyle = {
     "--ac": C.ac, "--ac-hover": C.hover, "--ac-tint": C.tint, "--ac-tint2": C.tint2, "--ac-border": C.border, "--ac-text": C.text,
     minHeight: "100vh", width: "100%", padding: 28, background: `radial-gradient(1200px 600px at 78% -8%, ${C.tint}, transparent 60%), oklch(0.975 0.006 250)`, overflow: "auto",
   } as CSSProperties;
 
-  // ── Chat thread + composer (shared) ──────────────────────────────
-  const ChatThread = () => (
+  // ── Chat thread + composer (reusable; called inline so inputs keep focus) ──
+  const renderThread = (msgs: Message[], busy: boolean) => (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      {messages.map(m => m.role === "user" ? (
+      {msgs.map(m => m.role === "user" ? (
         <div key={m.id} style={{ display: "flex", justifyContent: "flex-end" }}>
           <div style={{ maxWidth: "80%", padding: "14px 18px", background: "var(--ac)", color: "#fff", borderRadius: "16px 16px 4px 16px", fontSize: 14.5, lineHeight: 1.6 }}>{m.text}</div>
         </div>
@@ -125,7 +297,7 @@ export default function App() {
           <div style={{ flex: "1 1 auto", minWidth: 0, padding: "14px 18px", background: "oklch(0.98 0.004 250)", border: "1px solid oklch(0.93 0.006 255)", borderRadius: "4px 16px 16px 16px", fontSize: 14.5, color: "oklch(0.3 0.02 255)" }} dangerouslySetInnerHTML={{ __html: mdToHtml(m.text) }} />
         </div>
       ))}
-      {thinking && (
+      {busy && (
         <div style={{ display: "flex", gap: 13, alignItems: "center" }}>
           <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 34, height: 34, borderRadius: 10, background: "var(--ac-tint)", flex: "0 0 auto" }}><Icon id="i-sparkles" stroke="var(--ac)" /></span>
           <div style={{ display: "flex", gap: 5, padding: "14px 18px", background: "oklch(0.98 0.004 250)", border: "1px solid oklch(0.93 0.006 255)", borderRadius: "4px 16px 16px 16px" }}>
@@ -136,11 +308,11 @@ export default function App() {
     </div>
   );
 
-  const Composer = ({ placeholder }: { placeholder: string }) => (
+  const renderComposer = (value: string, onChange: (v: string) => void, onSend: () => void, placeholder: string) => (
     <div className="fl-composer" style={{ display: "flex", alignItems: "flex-end", gap: 10, padding: "8px 8px 8px 18px", background: "#fff", border: `1px solid ${BORDER}`, borderRadius: 16, boxShadow: "0 1px 2px rgba(16,24,40,.04)" }}>
-      <textarea value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); } }} placeholder={placeholder} rows={1}
+      <textarea value={value} onChange={e => onChange(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onSend(); } }} placeholder={placeholder} rows={1}
         style={{ flex: "1 1 auto", minWidth: 0, border: "none", outline: "none", background: "none", resize: "none", fontFamily: "inherit", fontSize: 14.5, lineHeight: 1.5, color: "oklch(0.3 0.02 255)", padding: "9px 0", maxHeight: 120 }} />
-      <button onClick={sendChat} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 42, height: 42, borderRadius: 11, background: "var(--ac)", border: "none", color: "#fff", cursor: "pointer", flex: "0 0 auto" }}><Icon id="i-send" /></button>
+      <button onClick={onSend} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 42, height: 42, borderRadius: 11, background: "var(--ac)", border: "none", color: "#fff", cursor: "pointer", flex: "0 0 auto" }}><Icon id="i-send" /></button>
     </div>
   );
 
@@ -170,40 +342,43 @@ export default function App() {
         <button onClick={() => { setConfigOpen(true); setMeetingsOpen(false); }} title="Settings" className="fl-hover-soft" style={{ ...iconBtn, width: 42, height: 42, borderRadius: 12 }}><Icon id="i-settings" size={19} /></button>
         <div style={{ position: "relative" }}>
           <button onClick={() => setMeetingsOpen(o => !o)} className="fl-hover-soft" style={{ display: "inline-flex", alignItems: "center", gap: 10, padding: "11px 16px", background: "#fff", border: `1px solid ${BORDER}`, borderRadius: 12, color: "oklch(0.27 0.025 255)", fontFamily: "inherit", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
-            <Icon id="i-radio" size={17} stroke="var(--ac)" /> Active meetings <Icon id="i-down" size={15} stroke="oklch(0.6 0.015 255)" />
+            <Icon id="i-radio" size={17} stroke="var(--ac)" /> Active meetings {activeMeetings.length > 0 && <span style={{ padding: "1px 7px", borderRadius: 999, background: "var(--ac)", color: "#fff", fontSize: 11, fontWeight: 700 }}>{activeMeetings.length}</span>} <Icon id="i-down" size={15} stroke="oklch(0.6 0.015 255)" />
           </button>
-          {meetingsOpen && meetingsPopover}
+          {meetingsOpen && renderMeetingsPopover()}
         </div>
       </div>
     </header>
   );
 
-  const meetingsPopover = (
+  function renderMeetingsPopover() { return (
     <div style={{ position: "absolute", top: "calc(100% + 12px)", right: 0, width: 380, background: "#fff", border: `1px solid ${BORDER}`, borderRadius: 18, boxShadow: "0 18px 50px -20px rgba(16,24,40,.4)", padding: 22, zIndex: 60, animation: "fl-pop .18s ease-out" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
         <div style={{ fontSize: 14, fontWeight: 700, color: "oklch(0.27 0.025 255)" }}>Active meetings</div>
-        <button onClick={() => force(n => n + 1)} title="Refresh" className="fl-hover-soft" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, border: "1px solid oklch(0.92 0.006 255)", borderRadius: 9, background: "#fff", color: "oklch(0.5 0.02 255)", cursor: "pointer" }}><Icon id="i-refresh" size={15} /></button>
+        <button onClick={loadMeetings} disabled={!ffKey || loadingMeetings} title="Refresh" className="fl-hover-soft" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, border: "1px solid oklch(0.92 0.006 255)", borderRadius: 9, background: "#fff", color: "oklch(0.5 0.02 255)", cursor: "pointer" }}><Icon id="i-refresh" size={15} /></button>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {MEETINGS.map(m => (
+        {activeMeetings.map(m => (
           <div key={m.id} className="fl-hover-soft" style={{ display: "flex", alignItems: "center", gap: 14, padding: 14, border: "1px solid oklch(0.93 0.006 255)", borderRadius: 13 }}>
             <span style={{ position: "relative", display: "inline-flex", width: 8, height: 8, flex: "0 0 auto" }}><span style={{ position: "absolute", inset: 0, borderRadius: "50%", background: "oklch(0.68 0.16 155)", animation: "fl-pulse 2.4s ease-out infinite" }} /><span style={{ position: "relative", width: 8, height: 8, borderRadius: "50%", background: "oklch(0.68 0.16 155)" }} /></span>
             <div style={{ flex: "1 1 auto", minWidth: 0 }}>
               <div style={{ fontSize: 14, fontWeight: 700, color: "oklch(0.27 0.025 255)" }}>{m.title}</div>
-              <div style={{ fontSize: 12.5, color: "oklch(0.6 0.015 255)", marginTop: 2 }}>{m.sub} · {m.time}</div>
+              <div style={{ fontSize: 12.5, color: "oklch(0.6 0.015 255)", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{[m.sub, m.time].filter(Boolean).join(" · ") || "Live now"}</div>
             </div>
-            <button onClick={connectMeeting} style={{ padding: "9px 16px", background: "var(--ac)", border: "none", borderRadius: 10, color: "#fff", fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", flex: "0 0 auto" }}>Connect</button>
+            <button onClick={() => startConnection(m)} disabled={isConnected || isConnecting} style={{ padding: "9px 16px", background: "var(--ac)", border: "none", borderRadius: 10, color: "#fff", fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", flex: "0 0 auto", opacity: isConnected || isConnecting ? 0.5 : 1 }}>Connect</button>
           </div>
         ))}
+        {activeMeetings.length === 0 && (
+          <div style={{ padding: "14px 4px", fontSize: 13, color: "oklch(0.6 0.015 255)", lineHeight: 1.5 }}>{loadingMeetings ? "Scanning for active meetings…" : ffKey ? "No active meetings right now." : "Add your Fireflies key to detect meetings."}</div>
+        )}
       </div>
       <div style={{ height: 1, background: "oklch(0.93 0.006 255)", margin: "18px 0" }} />
       <div style={{ fontSize: 12.5, fontWeight: 600, color: "oklch(0.5 0.02 255)", marginBottom: 10 }}>Paste a meeting ID</div>
       <div style={{ display: "flex", gap: 10 }}>
-        <input value={pasteId} onChange={e => setPasteId(e.target.value)} placeholder="app.fireflies.ai/view/…" className="fl-focus" style={{ flex: "1 1 auto", minWidth: 0, padding: "11px 14px", border: `1px solid ${BORDER}`, borderRadius: 11, fontFamily: "'JetBrains Mono',monospace", fontSize: 12.5, color: "oklch(0.3 0.02 255)", outline: "none" }} />
+        <input value={pasteId} onChange={e => setPasteId(e.target.value)} onKeyDown={e => { if (e.key === "Enter") connectMeeting(); }} placeholder="app.fireflies.ai/view/…" className="fl-focus" style={{ flex: "1 1 auto", minWidth: 0, padding: "11px 14px", border: `1px solid ${BORDER}`, borderRadius: 11, fontFamily: "'JetBrains Mono',monospace", fontSize: 12.5, color: "oklch(0.3 0.02 255)", outline: "none" }} />
         <button onClick={connectMeeting} className="fl-hover-soft" style={{ padding: "0 18px", background: "oklch(0.97 0.005 250)", border: `1px solid ${BORDER}`, borderRadius: 11, color: "oklch(0.3 0.02 255)", fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", flex: "0 0 auto" }}>Connect</button>
       </div>
     </div>
-  );
+  ); }
 
   // ── Transcript card ───────────────────────────────────────────────
   const transcriptCard = (
@@ -213,14 +388,14 @@ export default function App() {
           <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 40, height: 40, borderRadius: 11, background: "var(--ac-tint)", flex: "0 0 auto" }}><Icon id="i-mic" size={19} stroke="var(--ac)" /></span>
           <div style={{ minWidth: 0 }}>
             <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 17, fontWeight: 700, color: "oklch(0.27 0.025 255)", letterSpacing: "-0.01em" }}>Live transcription</div>
-            {isConnected && <div style={{ fontSize: 13, color: "oklch(0.6 0.015 255)", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>Acme Corp · Discovery</div>}
+            {isConnected && selectedMeeting && <div style={{ fontSize: 13, color: "oklch(0.6 0.015 255)", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{selectedMeeting.title}</div>}
           </div>
         </div>
         {isConnected && (
           <div style={{ display: "flex", alignItems: "center", gap: 10, flex: "0 0 auto" }}>
             <button onClick={() => setQuestionMode(q => !q)} style={qBtnStyle(questionMode)}><Icon id="i-sparkles" size={16} />Question mode</button>
-            <button title="Copy" className="fl-hover-soft" style={{ ...iconBtn }}><Icon id="i-copy" size={17} /></button>
-            <button title="Export to Markdown" className="fl-hover-soft" style={{ ...iconBtn }}><Icon id="i-download" size={17} /></button>
+            <button onClick={copyTx} title="Copy" className="fl-hover-soft" style={{ ...iconBtn }}><Icon id={copied ? "i-check" : "i-copy"} size={17} stroke={copied ? "oklch(0.6 0.14 155)" : "currentColor"} /></button>
+            <button onClick={exportMd} title="Export to Markdown" className="fl-hover-soft" style={{ ...iconBtn }}><Icon id="i-download" size={17} /></button>
           </div>
         )}
       </div>
@@ -232,16 +407,22 @@ export default function App() {
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
                   <span style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "5px 11px", background: "var(--ac)", borderRadius: 999, color: "#fff", fontSize: 11.5, fontWeight: 700, letterSpacing: "0.01em" }}><Icon id="i-arrow" size={13} sw={2.2} />Say this</span>
                   <span style={{ fontSize: 12.5, color: "var(--ac-text)", fontWeight: 600 }}>Drafted for you · read it aloud</span>
-                  <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "oklch(0.6 0.015 255)" }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: "oklch(0.68 0.16 155)" }} />live</span>
+                  <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "oklch(0.6 0.015 255)" }}>
+                    {answering
+                      ? <>{[0, 0.2, 0.4].map((d, i) => <span key={i} style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--ac)", animation: `fl-think 1.2s ease-in-out ${d}s infinite` }} />)}<span style={{ marginLeft: 3 }}>formulating</span></>
+                      : <><span style={{ width: 7, height: 7, borderRadius: "50%", background: "oklch(0.68 0.16 155)" }} />live</>}
+                  </span>
                 </div>
-                <div style={{ fontSize: 15, lineHeight: 1.65, color: "oklch(0.3 0.02 255)" }} dangerouslySetInnerHTML={{ __html: mdToHtml(Q_BANNER_TEXT) }} />
+                {liveAnswer
+                  ? <div style={{ fontSize: 15, lineHeight: 1.65, color: "oklch(0.3 0.02 255)" }} dangerouslySetInnerHTML={{ __html: mdToHtml(liveAnswer) }} />
+                  : <div style={{ fontSize: 14, lineHeight: 1.6, color: "oklch(0.55 0.015 255)" }}>{answering ? "Formulating a response…" : "Listening — I'll draft what to say when someone asks you something."}</div>}
               </div>
             )}
             <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
-              {PARAS.map((p, i) => (
-                <div key={i}>
-                  <div style={{ fontSize: 12.5, fontWeight: 700, letterSpacing: "0.01em", marginBottom: 5, color: p.color }}>{p.name}</div>
-                  <div style={{ fontSize: 15.5, lineHeight: 1.7, color: "oklch(0.32 0.018 255)" }}>{p.text}</div>
+              {grouped.map(l => (
+                <div key={l.id}>
+                  <div style={{ fontSize: 12.5, fontWeight: 700, letterSpacing: "0.01em", marginBottom: 5, color: speakerColor(l.speaker) }}>{l.speaker}</div>
+                  <div style={{ fontSize: 15.5, lineHeight: 1.7, color: "oklch(0.32 0.018 255)" }}>{l.text}{!l.isFinal && <span style={{ display: "inline-block", width: 7, height: 16, background: "var(--ac)", borderRadius: 2, marginLeft: 4, verticalAlign: "middle", animation: "fl-blink 1.1s steps(1) infinite" }} />}</div>
                 </div>
               ))}
               <div style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 4, color: "oklch(0.7 0.012 255)", fontSize: 13 }}>
@@ -267,7 +448,10 @@ export default function App() {
                 </div>
               ))}
             </div>
-            <button onClick={() => setMeetingsOpen(true)} style={{ marginTop: 28, display: "inline-flex", alignItems: "center", gap: 10, padding: "13px 22px", background: "var(--ac)", border: "none", borderRadius: 12, color: "#fff", fontFamily: "inherit", fontSize: 14.5, fontWeight: 700, cursor: "pointer" }}><Icon id="i-radio" size={17} />See active meetings</button>
+            <div style={{ position: "relative", marginTop: 28 }}>
+              <button onClick={() => { setMeetingsOpenIdle(o => !o); if (ffKey) loadMeetings(); }} style={{ display: "inline-flex", alignItems: "center", gap: 10, padding: "13px 22px", background: "var(--ac)", border: "none", borderRadius: 12, color: "#fff", fontFamily: "inherit", fontSize: 14.5, fontWeight: 700, cursor: "pointer" }}><Icon id="i-radio" size={17} />See active meetings<Icon id="i-down" size={15} /></button>
+              {meetingsOpenIdle && renderMeetingsPopover()}
+            </div>
           </div>
         )}
         {isConnecting && (
@@ -305,9 +489,10 @@ export default function App() {
             <button key={f.id} onClick={() => { setFilter(f.id); setFeedExpanded(false); }} style={filterChip(active)}>{f.l}{f.id !== "all" && <span style={countBadge(active)}>{cnt}</span>}</button>
           ); })}
         </div>
+        {!orKey && <div style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 11.5, fontWeight: 600, color: "oklch(0.6 0.015 255)", marginBottom: 14 }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: "oklch(0.78 0.14 75)" }} />AI offline — set OPENROUTER_API</div>}
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {visibleSug.map(s => { const m = SUGMETA[s.type]; return (
-            <button key={s.id} onClick={() => setView("chat")} style={{ display: "flex", gap: 14, width: "100%", padding: "16px 18px", background: "#fff", border: "1px solid oklch(0.93 0.006 255)", borderRadius: 14, cursor: "pointer", textAlign: "left" }}>
+            <button key={s.id} onClick={() => handleSuggestion(s)} disabled={thinking || piThinking} style={{ display: "flex", gap: 14, width: "100%", padding: "16px 18px", background: "#fff", border: "1px solid oklch(0.93 0.006 255)", borderRadius: 14, cursor: "pointer", textAlign: "left", opacity: thinking || piThinking ? 0.6 : 1 }}>
               <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 34, height: 34, borderRadius: 10, flex: "0 0 auto", background: m.bg }}><Icon id={m.icon} size={17} stroke={m.color} /></span>
               <div style={{ flex: "1 1 auto", minWidth: 0 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5 }}>
@@ -327,41 +512,20 @@ export default function App() {
 
   const chatPanel = (
     <section style={{ display: "flex", flexDirection: "column" }}>
-      {sectionLabel("i-message", "AI assistant")}
+      {sectionLabel("i-message", "AI assistant", !orKey ? <span style={{ fontSize: 11.5, fontWeight: 600, color: "oklch(0.6 0.015 255)" }}>offline</span> : undefined)}
       <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 18 }}>
-        <div className="fl-scroll" style={{ display: "flex", flexDirection: "column", gap: 20, maxHeight: 440, overflowY: "auto", paddingRight: 4 }}><ChatThread /></div>
-        <Composer placeholder="Ask the AI anything…" />
+        <div className="fl-scroll" style={{ display: "flex", flexDirection: "column", gap: 20, maxHeight: "min(56vh, 540px)", overflowY: "auto", paddingRight: 4 }}>{renderThread(messages, thinking)}</div>
+        {renderComposer(chatInput, setChatInput, sendChat, "Ask anything about the meeting…")}
       </div>
     </section>
   );
 
-  const termPanel = (
-    <section>
-      {sectionLabel("i-terminal", "Backend terminal", <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 600, color: "oklch(0.6 0.015 255)" }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: "oklch(0.68 0.16 155)" }} />PI online</span>)}
-      <div style={{ marginTop: 16 }}>
-        <div className="fl-scroll" style={{ background: "oklch(0.2 0.025 260)", borderRadius: 14, padding: "20px 22px", minHeight: 200, maxHeight: 280, overflowY: "auto", fontFamily: "'JetBrains Mono',monospace", fontSize: 12.5, lineHeight: 1.7 }}>
-          {termLines.map((l, i) => <div key={i} style={{ color: termColor(l.k), whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{l.t}</div>)}
-        </div>
-        {pendingCmd && (
-          <div style={{ marginTop: 12, padding: "16px 18px", background: "oklch(0.97 0.03 75)", border: "1px solid oklch(0.85 0.08 75)", borderRadius: 13 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 13, fontWeight: 700, color: "oklch(0.45 0.1 60)", marginBottom: 6 }}><Icon id="i-help" size={15} />Run this on your machine?</div>
-            <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 12.5, color: "oklch(0.35 0.02 255)", background: "#fff", border: "1px solid oklch(0.9 0.02 75)", borderRadius: 8, padding: "9px 12px", marginBottom: 14, wordBreak: "break-all" }}>{routePI ? "pi $ " : "$ "}{pendingCmd}</div>
-            <div style={{ display: "flex", gap: 10 }}>
-              <button onClick={() => setPendingCmd(null)} className="fl-hover-soft" style={{ flex: "1 1 auto", padding: 10, background: "#fff", border: "1px solid oklch(0.9 0.01 255)", borderRadius: 10, color: "oklch(0.4 0.02 255)", fontFamily: "inherit", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
-              <button onClick={confirmCmd} style={{ flex: "1 1 auto", padding: 10, background: "var(--ac)", border: "none", borderRadius: 10, color: "#fff", fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Run command</button>
-            </div>
-          </div>
-        )}
-        <div className="fl-composer" style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 10, padding: "8px 8px 8px 16px", background: "#fff", border: `1px solid ${BORDER}`, borderRadius: 13 }}>
-          <Icon id="i-terminal" size={16} stroke="oklch(0.6 0.015 255)" />
-          <input value={termInput} onChange={e => setTermInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); submitTerm(); } }} placeholder="Type a shell command…" style={{ flex: "1 1 auto", minWidth: 0, border: "none", outline: "none", background: "none", fontFamily: "'JetBrains Mono',monospace", fontSize: 13, color: "oklch(0.3 0.02 255)" }} />
-          <button onClick={submitTerm} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 38, height: 38, borderRadius: 9, background: "var(--ac)", border: "none", color: "#fff", cursor: "pointer", flex: "0 0 auto" }}><Icon id="i-send" size={16} /></button>
-        </div>
-        <button onClick={() => setRoutePI(v => !v)} style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 12, width: "100%", padding: "13px 16px", background: "oklch(0.98 0.004 250)", border: "1px solid oklch(0.93 0.006 255)", borderRadius: 12, cursor: "pointer", textAlign: "left" }}>
-          <Icon id="i-plug" size={17} stroke="var(--ac)" />
-          <span style={{ flex: "1 1 auto", fontSize: 13.5, fontWeight: 600, color: "oklch(0.32 0.018 255)" }}>Route through PI</span>
-          <span style={track(routePI)}><span style={knob(routePI)} /></span>
-        </button>
+  const piPanel = (
+    <section style={{ display: "flex", flexDirection: "column" }}>
+      {sectionLabel("i-terminal", "PI", <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 600, color: "oklch(0.6 0.015 255)" }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: bridgeOnline ? "oklch(0.68 0.16 155)" : "oklch(0.7 0.01 250)" }} />{bridgeOnline ? "online" : "offline"}</span>)}
+      <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 18 }}>
+        <div className="fl-scroll" style={{ display: "flex", flexDirection: "column", gap: 20, maxHeight: "min(56vh, 540px)", overflowY: "auto", paddingRight: 4 }}>{renderThread(piMessages, piThinking)}</div>
+        {renderComposer(piInput, setPiInput, submitPI, "Message PI — ask, or run a command…")}
       </div>
     </section>
   );
@@ -382,7 +546,7 @@ export default function App() {
         </div>
         {tab === "feed" && feedPanel}
         {tab === "chat" && chatPanel}
-        {tab === "terminal" && termPanel}
+        {tab === "pi" && piPanel}
       </div>
     </div>
   );
@@ -395,11 +559,11 @@ export default function App() {
           <Icon id="i-sparkles" size={22} stroke="var(--ac)" />
           <div>
             <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 18, fontWeight: 700, color: "oklch(0.27 0.025 255)", letterSpacing: "-0.01em" }}>AI assistant</div>
-            <div style={{ fontSize: 13, color: "oklch(0.6 0.015 255)", marginTop: 1 }}>Ask anything about this meeting</div>
+            <div style={{ fontSize: 13, color: "oklch(0.6 0.015 255)", marginTop: 1 }}>Ask anything about this meeting{!orKey && " · AI offline"}</div>
           </div>
         </div>
-        <div className="fl-scroll" style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", padding: "18px 40px 8px" }}><ChatThread /></div>
-        <div style={{ padding: "18px 40px 30px", flex: "0 0 auto" }}><Composer placeholder="Ask the AI anything…" /></div>
+        <div className="fl-scroll" style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", padding: "18px 40px 8px" }}>{renderThread(messages, thinking)}</div>
+        <div style={{ padding: "18px 40px 30px", flex: "0 0 auto" }}>{renderComposer(chatInput, setChatInput, sendChat, "Ask anything about the meeting…")}</div>
       </div>
     </div>
   );
@@ -420,9 +584,14 @@ export default function App() {
             <div style={{ fontSize: 13, color: "oklch(0.58 0.015 255)", marginBottom: 16, lineHeight: 1.5 }}>Sets the assistant's operating context for this call.</div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
               {MODES.map(m => <button key={m.id} onClick={() => selectMode(m.id)} style={modeChip(mode === m.id)}>{m.l}</button>)}
-              {suggested.map(m => <button key={m.id} onClick={() => selectMode(m.id)} style={modeChip(mode === m.id)}><Icon id="i-sparkles" size={13} />{m.l}</button>)}
             </div>
-            <button onClick={suggestModes} style={{ marginTop: 14, display: "inline-flex", alignItems: "center", gap: 9, padding: "11px 16px", background: "var(--ac-tint)", border: "1px solid var(--ac-border)", borderRadius: 11, color: "var(--ac-text)", fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer" }}><Icon id="i-sparkles" size={15} />Suggest from meeting</button>
+            <button onClick={suggestModes} disabled={proposing || grouped.length === 0} style={{ marginTop: 14, display: "inline-flex", alignItems: "center", gap: 9, padding: "11px 16px", background: "var(--ac-tint)", border: "1px solid var(--ac-border)", borderRadius: 11, color: "var(--ac-text)", fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", opacity: proposing || grouped.length === 0 ? 0.55 : 1 }}><Icon id="i-sparkles" size={15} />{proposing ? "Reading…" : "Suggest from meeting"}</button>
+            {suggested.length > 0 && (
+              <select value={suggested.some(s => s.id === mode) ? mode : ""} onChange={e => { if (e.target.value) selectMode(e.target.value); }} className="fl-focus" style={{ marginTop: 12, width: "100%", appearance: "none", WebkitAppearance: "none", padding: "12px 38px 12px 16px", border: `1px solid ${BORDER}`, borderRadius: 11, background: "#fff url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E\") no-repeat right 14px center", fontFamily: "inherit", fontSize: 13.5, fontWeight: 600, color: "oklch(0.3 0.02 255)", cursor: "pointer", outline: "none" }}>
+                <option value="">Proposed modes…</option>
+                {suggested.map(m => <option key={m.id} value={m.id}>{m.l}</option>)}
+              </select>
+            )}
             <textarea value={customContext} onChange={e => setCustomContext(e.target.value)} placeholder="Add custom context — e.g. “Enterprise renewal, focus on security and SSO.”" className="fl-focus" style={{ marginTop: 16, width: "100%", minHeight: 84, resize: "vertical", padding: "14px 16px", border: `1px solid ${BORDER}`, borderRadius: 12, fontFamily: "inherit", fontSize: 13.5, lineHeight: 1.6, color: "oklch(0.3 0.02 255)", outline: "none" }} />
           </div>
           <div style={{ height: 1, background: "oklch(0.93 0.006 255)" }} />

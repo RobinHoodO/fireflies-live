@@ -1,5 +1,6 @@
-// Mock data + style helpers, ported from the design source (Fireflies Live.dc.html).
-// Interface-only: no real data, no backend. Phase 2 swaps these for live wiring.
+// Static config + style helpers, ported from the design source (Fireflies Live.dc.html).
+// Phase 2: the mock content (transcript, meetings, suggestions, chat, terminal) has
+// been removed — those now come from the live backend. What remains is design config.
 import type { CSSProperties } from "react";
 
 export const C = {
@@ -7,26 +8,44 @@ export const C = {
   tint2: "oklch(0.93 0.05 242)", border: "oklch(0.84 0.08 242)", text: "oklch(0.45 0.17 242)",
 };
 
-export type Para = { name: string; color: string; text: string };
-export const PARAS: Para[] = [
-  { name: "Maya Chen", color: "oklch(0.55 0.16 25)", text: "Thanks for hopping on. We're evaluating a few tools to cut down the time our CS team spends writing follow-ups after every call." },
-  { name: "You", color: "oklch(0.52 0.16 242)", text: "Totally — that's the pain we hear most. Before I dive in, how big is the CS team today?" },
-  { name: "Maya Chen", color: "oklch(0.55 0.16 25)", text: "We're at fourteen, scaling to maybe twenty-five by end of year. Onboarding new reps fast is the other headache." },
-  { name: "Devin Rao", color: "oklch(0.5 0.14 155)", text: "On onboarding, the shared call library has been the biggest win for our mid-market customers — new hires ramp by listening to real calls." },
-  { name: "Maya Chen", color: "oklch(0.55 0.16 25)", text: "Good to know. What does pricing look like for a team our size — and is there a ramp as we grow?" },
-];
-
 export const MODES = [
   { id: "sales", l: "Sales call" }, { id: "interview", l: "Interview" }, { id: "standup", l: "Standup" },
   { id: "negotiation", l: "Negotiation" }, { id: "oneone", l: "1:1" }, { id: "discovery", l: "Discovery" },
 ];
 
+// OpenRouter model slugs (verified slug format). Grouped by provider.
 export const MODELS = [
-  { p: "Anthropic", items: [{ id: "anthropic/claude-sonnet-4", l: "Claude Sonnet 4" }, { id: "anthropic/claude-opus-4", l: "Claude Opus 4" }, { id: "anthropic/claude-haiku", l: "Claude Haiku" }] },
-  { p: "OpenAI", items: [{ id: "openai/gpt-4o", l: "GPT-4o" }, { id: "openai/gpt-4o-mini", l: "GPT-4o mini" }, { id: "openai/o3", l: "o3" }] },
-  { p: "Google", items: [{ id: "google/gemini-2.5-pro", l: "Gemini 2.5 Pro" }, { id: "google/gemini-flash", l: "Gemini 2.5 Flash" }] },
-  { p: "DeepSeek", items: [{ id: "deepseek/v3", l: "DeepSeek V3" }, { id: "deepseek/r1", l: "DeepSeek R1" }] },
-  { p: "Meta Llama", items: [{ id: "meta/llama-3.3-70b", l: "Llama 3.3 70B" }] },
+  { p: "Anthropic", items: [
+    { id: "anthropic/claude-sonnet-4", l: "Claude Sonnet 4" },
+    { id: "anthropic/claude-opus-4.1", l: "Claude Opus 4.1" },
+    { id: "anthropic/claude-3.7-sonnet", l: "Claude 3.7 Sonnet" },
+    { id: "anthropic/claude-3.5-haiku", l: "Claude 3.5 Haiku" },
+  ] },
+  { p: "OpenAI", items: [
+    { id: "openai/gpt-4.1", l: "GPT-4.1" },
+    { id: "openai/gpt-4o", l: "GPT-4o" },
+    { id: "openai/gpt-4o-mini", l: "GPT-4o mini" },
+    { id: "openai/o3", l: "o3" },
+    { id: "openai/o4-mini", l: "o4-mini" },
+  ] },
+  { p: "Google", items: [
+    { id: "google/gemini-2.5-pro", l: "Gemini 2.5 Pro" },
+    { id: "google/gemini-2.5-flash", l: "Gemini 2.5 Flash" },
+    { id: "google/gemini-2.0-flash-001", l: "Gemini 2.0 Flash" },
+  ] },
+  { p: "DeepSeek", items: [
+    { id: "deepseek/deepseek-v4-flash", l: "DeepSeek V4 Flash" },
+    { id: "deepseek/deepseek-v4-pro", l: "DeepSeek V4 Pro" },
+    { id: "deepseek/deepseek-v3.2", l: "DeepSeek V3.2" },
+    { id: "deepseek/deepseek-chat-v3.1", l: "DeepSeek V3.1" },
+    { id: "deepseek/deepseek-r1-0528", l: "DeepSeek R1" },
+  ] },
+  { p: "Meta Llama", items: [
+    { id: "meta-llama/llama-3.3-70b-instruct", l: "Llama 3.3 70B" },
+    { id: "meta-llama/llama-3.1-405b-instruct", l: "Llama 3.1 405B" },
+  ] },
+  { p: "xAI", items: [{ id: "x-ai/grok-2-1212", l: "Grok 2" }] },
+  { p: "Mistral", items: [{ id: "mistralai/mistral-large", l: "Mistral Large" }] },
 ];
 
 export const FLAGS = [
@@ -34,68 +53,33 @@ export const FLAGS = [
   { k: "summary", l: "Live summary" }, { k: "speakers", l: "Speaker labels" }, { k: "profanity", l: "Profanity filter" },
 ];
 
-export const MEETINGS = [
-  { id: "acme", title: "Acme Corp", sub: "Discovery · 5 people", time: "12:31" },
-  { id: "internal", title: "Weekly Standup", sub: "Internal · 8 people", time: "04:02" },
-];
-
 export const VIEWS = [
   { id: "transcript", l: "Transcript", ic: "i-file" }, { id: "split", l: "Split", ic: "i-columns" }, { id: "chat", l: "Chat", ic: "i-sparkles" },
 ];
 
 export const TABS = [
-  { id: "feed", l: "Live feed", ic: "i-bulb" }, { id: "chat", l: "Chat", ic: "i-message" }, { id: "terminal", l: "Terminal", ic: "i-terminal" },
+  { id: "feed", l: "Live feed", ic: "i-bulb" }, { id: "chat", l: "Chat", ic: "i-message" }, { id: "pi", l: "PI", ic: "i-terminal" },
 ];
 
-export const FILTERS = [{ id: "all", l: "All" }, { id: "ask", l: "Ask" }, { id: "do", l: "Do" }, { id: "note", l: "Note" }];
+export const FILTERS = [{ id: "all", l: "All" }, { id: "ask", l: "Ask" }, { id: "do", l: "Do" }, { id: "note", l: "Note" }, { id: "command", l: "Command" }];
 
 export const SUGMETA: Record<string, { kind: string; icon: string; color: string; bg: string }> = {
   ask: { kind: "Ask", icon: "i-help", color: "oklch(0.55 0.16 242)", bg: "oklch(0.965 0.03 242)" },
   do: { kind: "Do", icon: "i-zap", color: "oklch(0.5 0.14 155)", bg: "oklch(0.96 0.04 155)" },
   note: { kind: "Note", icon: "i-bulb", color: "oklch(0.6 0.12 70)", bg: "oklch(0.97 0.04 75)" },
+  command: { kind: "Command", icon: "i-terminal", color: "oklch(0.52 0.15 290)", bg: "oklch(0.96 0.03 290)" },
 };
 
-export const SUG_POOL = [
-  { type: "ask", text: "Ask Maya what success looks like 90 days after rollout." },
-  { type: "do", text: "Generate a one-line value recap for the chat." },
-  { type: "note", text: "Devin surfaced the shared call library — strong onboarding hook." },
-  { type: "ask", text: "Confirm the timeline: when do they want to be live?" },
-  { type: "do", text: "Draft a follow-up email with pricing tiers attached." },
-  { type: "note", text: "Decision likely involves more than Maya — map the buying group." },
-];
-
+// Live data shapes — populated by the backend at runtime (see App.tsx / backend.ts).
 export type Suggestion = { id: number; type: string; text: string; t: number };
-export function initialSuggestions(now: number): Suggestion[] {
-  return [
-    { id: 1, type: "note", text: "Budget sensitivity signal — they asked about a ramp as the team grows.", t: now - 184000 },
-    { id: 2, type: "do", text: "Pull mid-market pricing tiers into the chat.", t: now - 122000 },
-    { id: 3, type: "ask", text: "Ask who else is involved in the buying decision.", t: now - 61000 },
-    { id: 4, type: "note", text: "Maya framed onboarding (14 → 25 reps) as a second buying motive.", t: now - 41000 },
-    { id: 5, type: "do", text: "Draft a recap email for this call.", t: now - 22000 },
-    { id: 6, type: "ask", text: "Ask what their current follow-up process costs in hours per week.", t: now - 4000 },
-  ];
-}
-
 export type Message = { id: number; role: "user" | "agent"; text: string };
-export const INITIAL_MESSAGES: Message[] = [
-  { id: 1, role: "agent", text: "Hi — I'm following this call live. Ask me anything, or tap a suggestion to dig in." },
-  { id: 2, role: "user", text: "Summarize what Maya cares about so far." },
-  { id: 3, role: "agent", text: "**Maya's priorities so far:**\n\n- **Follow-up time** — her CS team spends too long writing post-call recaps.\n- **Onboarding speed** — scaling `14 → 25` reps this year; ramping new hires fast is a real pain.\n- **Pricing that scales** — she wants a *range* and a growth ramp, not a flat number.\n\nBest next move: anchor on time saved before you say a price." },
-];
-
 export type TermLine = { k: string; t: string };
-export const INITIAL_TERM: TermLine[] = [
-  { k: "system", t: "PI bridge connected · 127.0.0.1:7842" },
-  { k: "system", t: "Delegate shell tasks to your machine. Every command asks first." },
-];
 
 export const EMPTY_STEPS = [
   { icon: "i-search", title: "Auto-detect active meetings", body: "Your live Fireflies sessions appear here — no setup needed." },
   { icon: "i-plug", title: "Pick one and hit Connect", body: "One click streams the transcript here in real time." },
   { icon: "i-command", title: "Or paste a meeting ID", body: "Grab it from app.fireflies.ai/view/ID, then connect." },
 ];
-
-export const Q_BANNER_TEXT = "**Acknowledge the budget question, then reframe around value before the number.**\n\n*“Great question — let me give you a range and how it scales as you grow.”* Anchor on the CS time saved across `14 → 25` reps, then offer the growth ramp so the future feels handled.";
 
 export const RATES = [
   { v: "8s", l: "Fast · 8s" }, { v: "12s", l: "Normal · 12s" }, { v: "20s", l: "Relaxed · 20s" }, { v: "30s", l: "Slow · 30s" }, { v: "off", l: "Paused" },
