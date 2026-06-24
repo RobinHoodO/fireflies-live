@@ -5,7 +5,10 @@ import {
   Mic, Play, Square, Send, Copy, Check, Lightbulb, Command,
   ChevronDown, ChevronUp, MessageSquare, RefreshCw, HelpCircle, Zap, Eye,
   Sparkles, Settings2, Radio, Columns, FileText, Cpu, Plug, Search,
+  X, Wand2, ArrowRight, Gauge,
 } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 const SPEAKER_COLORS = [
   "text-emerald-600", "text-sky-600", "text-amber-600", "text-rose-600",
@@ -18,12 +21,32 @@ function speakerColor(name: string) {
   return SPEAKER_COLORS[Math.abs(hash) % SPEAKER_COLORS.length];
 }
 
+// Tiny relative-time formatter for the suggestion feed timestamps.
+function relTime(ts: number): string {
+  const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  if (s < 8) return "just now";
+  if (s < 60) return `${s}s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  return `${h}h ago`;
+}
+
+const PULSE_OPTIONS: { value: number; label: string }[] = [
+  { value: 8000, label: "Fast · 8s" },
+  { value: 12000, label: "Normal · 12s" },
+  { value: 20000, label: "Relaxed · 20s" },
+  { value: 30000, label: "Slow · 30s" },
+  { value: 0, label: "Off" },
+];
+
 type SuggestionType = "question" | "action" | "insight";
 
 interface Suggestion {
   text: string;
   type: SuggestionType;
   id: string;
+  ts: number;
 }
 
 const SUGGESTION_STYLE: Record<SuggestionType, { icon: typeof HelpCircle; bg: string; border: string; dot: string; icon_color: string; label: string }> = {
@@ -65,7 +88,7 @@ async function fetchSuggestions(ctx: string, key: string, context: string, model
   try {
     const arr = JSON.parse(raw.slice(raw.indexOf("["), raw.lastIndexOf("]") + 1));
     const valid: SuggestionType[] = ["question", "action", "insight"];
-    return arr.filter((x: any) => x?.text).slice(0, 3).map((x: any) => ({ text: String(x.text), type: valid.includes(x.type) ? x.type : "insight", id: crypto.randomUUID() }));
+    return arr.filter((x: any) => x?.text).slice(0, 3).map((x: any) => ({ text: String(x.text), type: valid.includes(x.type) ? x.type : "insight", id: crypto.randomUUID(), ts: Date.now() }));
   } catch { return []; }
 }
 
@@ -166,14 +189,68 @@ function connectDemo(onLine: (speaker: string, text: string, final: boolean, key
   };
 }
 
-const AI_MODELS: { value: string; label: string }[] = [
-  { value: "deepseek/deepseek-chat", label: "DeepSeek Chat (fast, cheap)" },
-  { value: "openai/gpt-4o-mini", label: "GPT-4o mini" },
-  { value: "openai/gpt-4o", label: "GPT-4o" },
-  { value: "anthropic/claude-3.5-sonnet", label: "Claude 3.5 Sonnet" },
-  { value: "google/gemini-flash-1.5", label: "Gemini 1.5 Flash" },
-  { value: "meta-llama/llama-3.1-70b-instruct", label: "Llama 3.1 70B" },
+// Curated OpenRouter models grouped by provider for granular choice. `group` drives <optgroup>.
+const AI_MODELS: { value: string; label: string; group: string }[] = [
+  // DeepSeek
+  { value: "deepseek/deepseek-chat", label: "DeepSeek Chat (fast, cheap)", group: "DeepSeek" },
+  { value: "deepseek/deepseek-r1", label: "DeepSeek R1 (reasoning)", group: "DeepSeek" },
+  // OpenAI
+  { value: "openai/gpt-4o-mini", label: "GPT-4o mini", group: "OpenAI" },
+  { value: "openai/gpt-4o", label: "GPT-4o", group: "OpenAI" },
+  { value: "openai/gpt-4.1", label: "GPT-4.1", group: "OpenAI" },
+  { value: "openai/gpt-4.1-mini", label: "GPT-4.1 mini", group: "OpenAI" },
+  { value: "openai/o1", label: "o1 (reasoning)", group: "OpenAI" },
+  { value: "openai/o3-mini", label: "o3-mini (reasoning)", group: "OpenAI" },
+  // Anthropic
+  { value: "anthropic/claude-3.7-sonnet", label: "Claude 3.7 Sonnet", group: "Anthropic" },
+  { value: "anthropic/claude-3.5-sonnet", label: "Claude 3.5 Sonnet", group: "Anthropic" },
+  { value: "anthropic/claude-3.5-haiku", label: "Claude 3.5 Haiku (fast)", group: "Anthropic" },
+  { value: "anthropic/claude-3-opus", label: "Claude 3 Opus", group: "Anthropic" },
+  // Google
+  { value: "google/gemini-2.0-flash-001", label: "Gemini 2.0 Flash", group: "Google" },
+  { value: "google/gemini-flash-1.5", label: "Gemini 1.5 Flash (fast, cheap)", group: "Google" },
+  { value: "google/gemini-pro-1.5", label: "Gemini 1.5 Pro", group: "Google" },
+  // Meta Llama
+  { value: "meta-llama/llama-3.3-70b-instruct", label: "Llama 3.3 70B", group: "Meta Llama" },
+  { value: "meta-llama/llama-3.1-70b-instruct", label: "Llama 3.1 70B", group: "Meta Llama" },
+  { value: "meta-llama/llama-3.1-405b-instruct", label: "Llama 3.1 405B", group: "Meta Llama" },
+  // Others
+  { value: "mistralai/mistral-large", label: "Mistral Large", group: "Other" },
+  { value: "qwen/qwen-2.5-72b-instruct", label: "Qwen 2.5 72B", group: "Other" },
+  { value: "x-ai/grok-2-1212", label: "Grok 2", group: "Other" },
 ];
+
+// Preset agent modes the user can click; each sets the agentContext fed to every AI call.
+const AGENT_MODES: { label: string; context: string }[] = [
+  { label: "Sales call", context: "You're supporting the host on a sales call. Surface objections, buying signals, pricing cues, and concise responses that move the deal forward." },
+  { label: "Interview", context: "Help the host interview a candidate: propose sharp follow-up questions, flag vague or evasive answers, and track competencies." },
+  { label: "Standup / sync", context: "Track decisions, blockers, action items and their owners. Keep everything concise and actionable." },
+  { label: "Negotiation", context: "Help the host negotiate: flag concessions, anchors, and suggested counter-offers in real time." },
+  { label: "1:1 / coaching", context: "Support a thoughtful 1:1: surface listening prompts, open questions, and gentle follow-ups." },
+  { label: "Discovery", context: "Help the host run product discovery: surface user pain points, jobs-to-be-done, and probing questions." },
+];
+
+// Ask the model to read the meeting and propose tailored agent modes (label + context).
+async function proposeModes(ctx: string, key: string, model: string): Promise<{ label: string; context: string }[]> {
+  const sys = `You are configuring a real-time meeting copilot. From the transcript, infer the meeting type and the host's likely goal. Propose up to 4 distinct "agent modes" — each a short label plus a one-sentence context instruction the copilot should adopt to best support the host. Respond ONLY as a JSON array: [{"label":"...","context":"..."}].`;
+  const raw = await callAI([{ role: "system", content: sys }, { role: "user", content: `Transcript:\n${ctx}` }], key, model);
+  try {
+    const arr = JSON.parse(raw.slice(raw.indexOf("["), raw.lastIndexOf("]") + 1));
+    return arr.filter((x: any) => x?.label && x?.context).slice(0, 4).map((x: any) => ({ label: String(x.label), context: String(x.context) }));
+  } catch { return []; }
+}
+
+// Question mode: draft what the host should say in reply to the latest turn (or "—" if none needed).
+async function fetchLiveAnswer(ctx: string, key: string, context: string, model: string): Promise<string> {
+  const sys = `You are a live meeting copilot helping the HOST respond.${context ? ` Context: ${context}` : ""} Look only at the most recent turns. If someone is asking the host a question or clearly expecting a response, draft a concise, natural reply (1-3 sentences) in the first person, ready to speak aloud. If no response is needed, reply with exactly "—". No preamble, no labels.`;
+  const raw = await callAI([{ role: "system", content: sys }, { role: "user", content: `Transcript:\n${ctx}` }], key, model);
+  return raw.trim();
+}
+
+// Rich-text renderer for AI output (fixes raw ** markdown showing as stars).
+function Markdown({ text }: { text: string }) {
+  return <div className="md"><ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown></div>;
+}
 
 export default function App() {
   const [status, setStatus] = useState<ConnectionStatus>("disconnected");
@@ -201,9 +278,20 @@ export default function App() {
   const [agentContext, setAgentContext] = useState("");
   const [aiModel, setAiModel] = useState("deepseek/deepseek-chat");
   const [viewMode, setViewMode] = useState<"split" | "transcript" | "chat">("split");
+  const [splitPct, setSplitPct] = useState(62);
+  const [pulseMs, setPulseMs] = useState(12000);
+  // View-only state for the suggestions feed: collapse/expand + type filter.
+  const [suggExpanded, setSuggExpanded] = useState(false);
+  const [suggFilter, setSuggFilter] = useState<"all" | "question" | "action" | "insight">("all");
+  const [questionMode, setQuestionMode] = useState(false);
+  const [liveAnswer, setLiveAnswer] = useState("");
+  const [proposedModes, setProposedModes] = useState<{ label: string; context: string }[]>([]);
+  const [proposingModes, setProposingModes] = useState(false);
+  // Presentation-only: Active Meetings popover open/closed (no data/logic).
+  const [meetingsOpen, setMeetingsOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null); const chatScrollRef = useRef<HTMLDivElement>(null);
   const connRef = useRef<{ connect: () => Promise<void>; disconnect: () => void } | null>(null);
-  const lastSpeakerRef = useRef(""); const lineCounter = useRef(0); const lastSuggestRef = useRef(0);
+  const lastSpeakerRef = useRef(""); const lineCounter = useRef(0); const lastSuggestRef = useRef(0); const lastAnswerRef = useRef(0);
 
   useEffect(() => { fetch("/api/fireflies-key").then(r => r.json()).then(d => { if (d.ffKey) setFfKey(d.ffKey); if (d.orKey) setOrKey(d.orKey); }).catch(() => {}); }, []);
   useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" }); }, [lines]);
@@ -227,15 +315,32 @@ export default function App() {
   // Auto-fetch active meetings as soon as the key arrives (on load / refresh).
   useEffect(() => { if (ffKey && useLive) loadMeetings(); }, [ffKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Real-time suggestions: throttled LLM pass over the live transcript.
+  // Real-time suggestions: throttled LLM pass; new items prepend to a running feed (history kept, newest first).
   useEffect(() => {
-    if (!useLive || !flags.aiSuggestions || !orKey || lines.length === 0) return;
+    if (!flags.aiSuggestions || !orKey || lines.length === 0 || pulseMs === 0) return;
     const now = Date.now();
-    if (now - lastSuggestRef.current < 12000) return;
+    if (now - lastSuggestRef.current < pulseMs) return;
     lastSuggestRef.current = now;
     const ctx = lines.map(l => `[${l.speaker}]: ${l.text}`).join("\n");
-    fetchSuggestions(ctx, orKey, agentContext, aiModel).then(s => { if (s.length) setSuggestions(s); }).catch(() => {});
-  }, [lines, flags.aiSuggestions, orKey, useLive, agentContext, aiModel]);
+    fetchSuggestions(ctx, orKey, agentContext, aiModel).then(fresh => {
+      if (!fresh.length) return;
+      setSuggestions(prev => {
+        const seen = new Set(prev.slice(0, 40).map(s => s.text.toLowerCase()));
+        const add = fresh.filter(s => !seen.has(s.text.toLowerCase()));
+        return [...add, ...prev].slice(0, 100); // newest first, capped
+      });
+    }).catch(() => {});
+  }, [lines, flags.aiSuggestions, orKey, agentContext, aiModel, pulseMs]);
+
+  // Question mode: when on, live-draft what the host should say in reply to the latest turn.
+  useEffect(() => {
+    if (!questionMode || !orKey || lines.length === 0) return;
+    const now = Date.now();
+    if (now - lastAnswerRef.current < 5000) return;
+    lastAnswerRef.current = now;
+    const ctx = lines.slice(-12).map(l => `[${l.speaker}]: ${l.text}`).join("\n");
+    fetchLiveAnswer(ctx, orKey, agentContext, aiModel).then(a => setLiveAnswer(a && a !== "—" ? a : "")).catch(() => {});
+  }, [lines, questionMode, orKey, agentContext, aiModel]);
 
   const useManualId = () => {
     if (!manualId.trim()) return;
@@ -276,6 +381,22 @@ export default function App() {
 
   const getCtx = () => grouped.map(l => `[${l.speaker}]: ${l.text}`).join("\n");
 
+  // Let the agent read the meeting and propose tailored modes the user can click.
+  const handleProposeModes = async () => {
+    if (!orKey || grouped.length === 0) return;
+    setProposingModes(true);
+    try { const m = await proposeModes(getCtx(), orKey, aiModel); if (m.length) setProposedModes(m); } catch {}
+    setProposingModes(false);
+  };
+
+  // Drag-to-resize the split between transcript and sidebar.
+  const startResize = (e: { preventDefault(): void }) => {
+    e.preventDefault();
+    const onMove = (ev: MouseEvent) => setSplitPct(Math.min(80, Math.max(28, (ev.clientX / window.innerWidth) * 100)));
+    const onUp = () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
+    window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp);
+  };
+
   const handleSuggestion = async (s: Suggestion) => {
     if (!orKey) return; setAiLoading(true);
     const ctx = getCtx();
@@ -301,53 +422,92 @@ export default function App() {
   const filtered = activeCategory === "all" ? QUICK_ACTIONS : QUICK_ACTIONS.filter(a => a.category === activeCategory);
   const dot = status === "connected" ? "bg-emerald-500" : status === "connecting" ? "bg-amber-500" : status === "error" ? "bg-rose-500" : "bg-text-muted/50";
   const activeMeetings = meetings.filter(m => m.active);
-  const pastMeetings = meetings.filter(m => !m.active);
 
-  const showTranscript = viewMode === "split" || viewMode === "transcript";
-  const showSidebar = viewMode === "split" || viewMode === "chat";
+  // ── Suggestions feed: pure view logic over `suggestions` ───────
+  // Filter by type, then show newest ~5 by default with a show-more reveal.
+  const SUGG_COLLAPSED = 5;
+  const SUGG_FILTERS: { value: typeof suggFilter; label: string }[] = [
+    { value: "all", label: "All" },
+    { value: "question", label: "Ask" },
+    { value: "action", label: "Do" },
+    { value: "insight", label: "Note" },
+  ];
+  const filteredSuggestions = suggFilter === "all" ? suggestions : suggestions.filter(s => s.type === suggFilter);
+  const visibleSuggestions = suggExpanded ? filteredSuggestions : filteredSuggestions.slice(0, SUGG_COLLAPSED);
+  const suggOverflow = filteredSuggestions.length - SUGG_COLLAPSED;
+
+  // ── Question-mode "Say this" live banner ───────────────────────
+  const sayThisBanner = questionMode && liveAnswer && (
+    <div className="px-9 lg:px-12 pt-8">
+      <div className="animate-live-glow rounded-2xl border border-accent/30 bg-accent-dim/60 backdrop-blur-sm overflow-hidden">
+        <div className="flex items-center gap-3 px-7 pt-5 pb-1.5">
+          <span className="relative flex w-2.5 h-2.5">
+            <span className="absolute inline-flex w-full h-full rounded-full bg-accent opacity-60 animate-ping" />
+            <span className="relative inline-flex rounded-full w-2.5 h-2.5 bg-accent" />
+          </span>
+          <span className="text-[11px] font-bold text-accent uppercase tracking-wider">Say this</span>
+          <ArrowRight size={13} className="text-accent" />
+          <span className="text-[11px] text-text-muted font-medium ml-auto">live suggested reply</span>
+        </div>
+        <div className="px-7 pb-6 pt-2 text-text-primary">
+          <Markdown text={liveAnswer} />
+        </div>
+      </div>
+    </div>
+  );
 
   // ── Transcription column ───────────────────────────────────────
   const transcriptColumn = (
-    <main className={`flex flex-col min-w-0 ${viewMode === "split" ? "flex-1 border-r border-border" : "flex-1"}`}>
-      <div className="h-16 border-b border-border flex items-center justify-between px-8 shrink-0">
-        <div className="flex items-center gap-3 min-w-0">
+    <main className="flex flex-col min-w-0 flex-1 h-full">
+      <div className="h-20 border-b border-border flex items-center justify-between px-9 lg:px-12 shrink-0">
+        <div className="flex items-center gap-3.5 min-w-0">
           <Mic size={16} className="text-accent shrink-0" />
           <span className="text-[14px] font-semibold text-text-primary tracking-tight">Live transcription</span>
-          {selectedMeeting && <span className="text-[12px] text-text-muted font-medium truncate max-w-[260px] pl-3 ml-1 border-l border-border">{selectedMeeting.title || selectedMeeting.id.slice(-8)}</span>}
+          {selectedMeeting && <span className="text-[12px] text-text-muted font-medium truncate max-w-[260px] pl-3.5 ml-1 border-l border-border">{selectedMeeting.title || selectedMeeting.id.slice(-8)}</span>}
         </div>
-        <button onClick={copyTx} title="Copy transcript" className="btn btn-ghost btn-icon shrink-0">{copiedId === "tx" ? <Check size={16} className="text-success" /> : <Copy size={16} />}</button>
+        <div className="flex items-center gap-3 shrink-0">
+          <button
+            onClick={() => setQuestionMode(!questionMode)}
+            data-active={questionMode}
+            className={`btn btn-sm ${questionMode ? "btn-primary" : "btn-secondary"}`}
+            title="Draft what to say in reply to the live conversation">
+            <Sparkles size={13} /> Question mode
+          </button>
+          <button onClick={copyTx} title="Copy transcript" className="btn btn-ghost btn-icon shrink-0">{copiedId === "tx" ? <Check size={16} className="text-success" /> : <Copy size={16} />}</button>
+        </div>
       </div>
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-8 py-8 space-y-1">
+      {sayThisBanner}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-9 lg:px-12 py-10 space-y-2">
         {lines.length === 0 && (
           <div className="flex items-center justify-center h-full">
-            <div className="text-center max-w-[480px] w-full">
-              <div className="mx-auto mb-7 grid place-items-center w-16 h-16 rounded-3xl bg-accent-dim border border-accent/15">
+            <div className="text-center max-w-[480px] w-full px-4">
+              <div className="mx-auto mb-8 grid place-items-center w-16 h-16 rounded-3xl bg-accent-dim border border-accent/15">
                 <Radio size={28} className="text-accent" />
               </div>
               <h2 className="text-[19px] font-semibold text-text-primary tracking-tight">Listen in on a live meeting</h2>
-              <p className="text-[13px] text-text-muted mt-2.5 leading-relaxed max-w-[400px] mx-auto">
+              <p className="text-[13px] text-text-muted mt-3 leading-relaxed max-w-[400px] mx-auto">
                 We auto-detect your active Fireflies meetings. Pick one and hit Connect — or paste a meeting ID to jump straight in.
               </p>
-              <div className="mt-8 grid gap-3 text-left">
-                <div className="card-soft flex items-start gap-4 p-5">
-                  <span className="grid place-items-center w-9 h-9 shrink-0 rounded-xl bg-accent-dim text-accent"><Search size={17} /></span>
+              <div className="mt-10 grid gap-4 text-left">
+                <div className="card-soft flex items-start gap-4 p-6">
+                  <span className="grid place-items-center w-10 h-10 shrink-0 rounded-xl bg-accent-dim text-accent"><Search size={17} /></span>
                   <div>
                     <p className="text-[13px] font-semibold text-text-primary">Auto-detect active meetings</p>
-                    <p className="text-[12px] text-text-muted mt-1 leading-relaxed">Your live sessions appear in the panel — no setup needed.</p>
+                    <p className="text-[12px] text-text-muted mt-1.5 leading-relaxed">Your live sessions appear in the panel — no setup needed.</p>
                   </div>
                 </div>
-                <div className="card-soft flex items-start gap-4 p-5">
-                  <span className="grid place-items-center w-9 h-9 shrink-0 rounded-xl bg-accent-dim text-accent"><Plug size={17} /></span>
+                <div className="card-soft flex items-start gap-4 p-6">
+                  <span className="grid place-items-center w-10 h-10 shrink-0 rounded-xl bg-accent-dim text-accent"><Plug size={17} /></span>
                   <div>
                     <p className="text-[13px] font-semibold text-text-primary">Pick one &amp; hit Connect</p>
-                    <p className="text-[12px] text-text-muted mt-1 leading-relaxed">One click streams the transcript here in real time.</p>
+                    <p className="text-[12px] text-text-muted mt-1.5 leading-relaxed">One click streams the transcript here in real time.</p>
                   </div>
                 </div>
-                <div className="card-soft flex items-start gap-4 p-5">
-                  <span className="grid place-items-center w-9 h-9 shrink-0 rounded-xl bg-accent-dim text-accent"><Command size={17} /></span>
+                <div className="card-soft flex items-start gap-4 p-6">
+                  <span className="grid place-items-center w-10 h-10 shrink-0 rounded-xl bg-accent-dim text-accent"><Command size={17} /></span>
                   <div>
                     <p className="text-[13px] font-semibold text-text-primary">Or paste a meeting ID</p>
-                    <p className="text-[12px] text-text-muted mt-1 leading-relaxed">
+                    <p className="text-[12px] text-text-muted mt-1.5 leading-relaxed">
                       Grab it from the URL <code className="font-mono text-[11px] bg-surface-2 text-text-secondary px-1.5 py-0.5 rounded border border-border">app.fireflies.ai/view/<span className="text-accent font-semibold">ID</span></code>, then Set &amp; Connect.
                     </p>
                   </div>
@@ -357,7 +517,7 @@ export default function App() {
           </div>
         )}
         {grouped.map(l => (
-          <div key={l.id} className="animate-fade-in group flex items-baseline gap-5 py-2.5 px-3 -mx-3 rounded-xl hover:bg-surface-2/60 transition-colors">
+          <div key={l.id} className="animate-fade-in group flex items-baseline gap-6 py-3 px-4 -mx-4 rounded-xl hover:bg-surface-2/60 transition-colors">
             <span className={`text-[12px] font-semibold shrink-0 w-[136px] text-right tracking-tight ${speakerColor(l.speaker)}`}>{l.speaker}</span>
             <span className="text-[15px] text-text-primary leading-relaxed">{l.text}{!l.isFinal && <span className="inline-block w-[2px] h-4 bg-accent ml-1 animate-cursor align-middle rounded-full" />}</span>
           </div>
@@ -368,35 +528,60 @@ export default function App() {
 
   // ── Config / context panel ─────────────────────────────────────
   const configPanel = (
-    <div className="border-b border-border px-6 py-6 space-y-6">
+    <div className="border-b border-border px-7 py-8 space-y-8">
       <div className="flex items-center gap-2.5 text-[13px] font-semibold text-text-primary tracking-tight">
         <Settings2 size={15} className="text-accent" /> Agent configuration
       </div>
 
-      {/* Agent context */}
-      <div className="space-y-2">
-        <label htmlFor="agent-context" className="block text-[11px] font-semibold text-text-secondary uppercase tracking-wider">Agent context / instructions</label>
-        <textarea id="agent-context" value={agentContext} onChange={e => setAgentContext(e.target.value)} rows={4}
-          placeholder="e.g. You're advising the host; goal is to close the deal. Flag risks and next steps."
-          className="field px-3.5 py-3 leading-relaxed resize-none" />
+      {/* Agent context modes */}
+      <div className="space-y-3.5">
+        <div className="flex items-center justify-between gap-3">
+          <label className="block text-[11px] font-semibold text-text-secondary uppercase tracking-wider">Agent mode</label>
+          <button onClick={handleProposeModes} disabled={proposingModes || grouped.length === 0}
+            className="chip chip-dashed" title="Let the AI read the meeting and propose tailored modes">
+            {proposingModes
+              ? <><RefreshCw size={12} className="animate-spin" /> Reading…</>
+              : <><Wand2 size={12} /> Suggest from meeting</>}
+          </button>
+        </div>
+        <div className="flex flex-wrap gap-2.5">
+          {AGENT_MODES.map(m => (
+            <button key={m.label} onClick={() => setAgentContext(m.context)} data-active={agentContext === m.context} className="chip">
+              {m.label}
+            </button>
+          ))}
+          {proposedModes.map(m => (
+            <button key={`p-${m.label}`} onClick={() => setAgentContext(m.context)} data-active={agentContext === m.context}
+              className="chip" title={m.context}>
+              <Sparkles size={11} /> {m.label}
+            </button>
+          ))}
+        </div>
+        <textarea value={agentContext} onChange={e => setAgentContext(e.target.value)} rows={3}
+          placeholder="Or write your own: 'You're advising the host; goal is to close the deal. Flag risks and next steps.'"
+          className="field px-4 py-3.5 leading-relaxed resize-none" />
       </div>
 
       {/* AI model */}
-      <div className="space-y-2">
+      <div className="space-y-2.5">
         <label htmlFor="ai-model" className="flex items-center gap-1.5 text-[11px] font-semibold text-text-secondary uppercase tracking-wider"><Cpu size={12} /> AI model (OpenRouter)</label>
         <select id="ai-model" value={aiModel} onChange={e => setAiModel(e.target.value)}
-          className="field px-3.5 py-2.5 cursor-pointer h-11">
-          {AI_MODELS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+          className="field px-4 py-3 cursor-pointer h-12">
+          {[...new Set(AI_MODELS.map(m => m.group))].map(g => (
+            <optgroup key={g} label={g}>
+              {AI_MODELS.filter(m => m.group === g).map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+            </optgroup>
+          ))}
         </select>
       </div>
 
       {/* Feature flags */}
-      <div className="space-y-2.5">
+      <div className="space-y-3">
         <span className="block text-[11px] font-semibold text-text-secondary uppercase tracking-wider">Features</span>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2.5">
           {(Object.keys(flags) as (keyof FeatureFlags)[]).map(k => (
             <button key={k} onClick={() => setFlags(p => ({ ...p, [k]: !p[k] }))}
-              className={`shrink-0 px-3.5 py-2 rounded-full text-[11px] font-semibold transition-all ${flags[k] ? "bg-accent text-white shadow-[0_2px_8px_-2px_var(--color-accent-glow)]" : "bg-surface-2 text-text-muted hover:text-text-secondary"}`}>
+              className={`shrink-0 px-4 py-2 rounded-full text-[11px] font-semibold transition-all cursor-pointer ${flags[k] ? "bg-accent text-white shadow-[0_2px_8px_-2px_var(--color-accent-glow)]" : "bg-surface-2 text-text-muted hover:text-text-secondary"}`}>
               {k.replace(/([A-Z])/g, " $1").replace(/^./, s => s.toUpperCase())}
             </button>
           ))}
@@ -411,28 +596,68 @@ export default function App() {
       <div className="flex-1 flex flex-col min-h-0 overflow-y-auto">
         {configPanel}
 
-        {/* Suggestions — color-coded */}
+        {/* Suggestions — live news-feed, newest first, filterable + collapsible */}
         {flags.aiSuggestions && (
           <div className="border-b border-border">
-            <div className="h-14 flex items-center px-6 text-[13px] font-semibold text-text-primary tracking-tight"><Lightbulb size={15} className="mr-2.5 text-amber-500" /> Suggestions</div>
-            <div className="px-4 pb-5 space-y-2.5">
-              {suggestions.length === 0 && <p className="text-[12.5px] text-text-muted px-2 py-1 font-medium leading-relaxed">Suggestions surface here as the conversation evolves. Tap one to ask the AI.</p>}
-              {suggestions.map((s, i) => {
+            <div className="min-h-16 flex items-center justify-between px-7 py-4 gap-4">
+              <div className="flex items-center text-[13px] font-semibold text-text-primary tracking-tight"><Lightbulb size={15} className="mr-2.5 text-amber-500" /> Live feed</div>
+              <label className="flex items-center gap-2 cursor-pointer" title="How often the AI refreshes suggestions">
+                <Gauge size={13} className="text-text-muted" />
+                <select value={pulseMs} onChange={e => setPulseMs(Number(e.target.value))}
+                  className="field !w-auto text-[11px] font-semibold pl-3 pr-2 py-2 cursor-pointer">
+                  {PULSE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </label>
+            </div>
+
+            {/* Filter chip row */}
+            <div className="flex items-center gap-2.5 px-7 pb-2">
+              {SUGG_FILTERS.map(f => {
+                const count = f.value === "all" ? suggestions.length : suggestions.filter(s => s.type === f.value).length;
+                return (
+                  <button key={f.value} onClick={() => setSuggFilter(f.value)} data-active={suggFilter === f.value} className="chip-filter">
+                    {f.label}
+                    {count > 0 && <span className="tabular-nums opacity-70">{count}</span>}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="px-5 pt-2 pb-6 space-y-3">
+              {filteredSuggestions.length === 0 && (
+                <p className="text-[12.5px] text-text-muted px-3 py-2 font-medium leading-relaxed">
+                  {suggestions.length === 0
+                    ? "Suggestions stream in here as the conversation evolves — newest on top. Tap one to ask the AI."
+                    : "Nothing in this filter yet. Try another, or switch back to All."}
+                </p>
+              )}
+              {visibleSuggestions.map((s, i) => {
                 const st = SUGGESTION_STYLE[s.type];
                 return (
                   <button key={s.id || i} onClick={() => handleSuggestion(s)} disabled={aiLoading}
-                    className={`group w-full animate-slide-in flex items-center gap-3.5 px-4 py-3.5 rounded-2xl border text-left transition-all disabled:opacity-40 hover:-translate-y-px active:translate-y-0 active:scale-[0.99] ${st.bg} ${st.border}`}>
-                    <div className="relative shrink-0">
+                    className={`group w-full ${i === 0 ? "animate-feed-in" : ""} flex items-start gap-4 px-5 py-4 rounded-2xl border text-left transition-all disabled:opacity-40 hover:-translate-y-px active:translate-y-0 active:scale-[0.99] cursor-pointer ${st.bg} ${st.border}`}>
+                    <div className="relative shrink-0 mt-0.5">
                       <st.icon size={16} className={st.icon_color} />
                       <span className={`absolute -top-1 -right-1 w-2 h-2 rounded-full ring-2 ring-surface-1 ${st.dot}`} />
                     </div>
-                    <div className="min-w-0">
-                      <span className="text-[9.5px] font-bold text-text-muted uppercase tracking-wider">{st.label}</span>
-                      <p className="text-[13px] text-text-secondary font-medium leading-snug mt-0.5">{s.text}</p>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2.5">
+                        <span className="text-[9.5px] font-bold text-text-muted uppercase tracking-wider">{st.label}</span>
+                        <span className="text-[9.5px] font-semibold text-text-muted/80 ml-auto tabular-nums">{relTime(s.ts)}</span>
+                      </div>
+                      <p className="text-[13px] text-text-secondary font-medium leading-snug mt-1.5">{s.text}</p>
                     </div>
                   </button>
                 );
               })}
+
+              {suggOverflow > 0 && (
+                <button onClick={() => setSuggExpanded(v => !v)} className="feed-toggle mt-1">
+                  {suggExpanded
+                    ? <>Show less <ChevronUp size={13} /></>
+                    : <>Show more ({suggOverflow}) <ChevronDown size={13} /></>}
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -441,19 +666,19 @@ export default function App() {
         {flags.codePalette && (
           <div className="border-b border-border">
             <button onClick={() => setShowPalette(!showPalette)}
-              className="w-full h-14 flex items-center justify-between px-6 text-[13px] font-semibold text-text-primary tracking-tight hover:bg-surface-2/60 transition-colors">
+              className="w-full h-16 flex items-center justify-between px-7 text-[13px] font-semibold text-text-primary tracking-tight hover:bg-surface-2/60 transition-colors">
               <div className="flex items-center gap-2.5"><Command size={15} className="text-accent" /> Code Palette</div>
               <span className="grid place-items-center w-7 h-7 rounded-lg text-text-muted">{showPalette ? <ChevronUp size={15} /> : <ChevronDown size={15} />}</span>
             </button>
             {showPalette && (
-              <div className="px-4 pb-5">
-                <div className="flex gap-2 mb-3.5 flex-wrap">
-                  {cats.map(c => <button key={c} onClick={() => setActiveCategory(c)} className={`shrink-0 px-3 py-1.5 rounded-full text-[11px] font-semibold capitalize transition-colors ${activeCategory === c ? "bg-accent text-white" : "bg-surface-2 text-text-muted hover:text-text-secondary"}`}>{c}</button>)}
+              <div className="px-5 pb-6">
+                <div className="flex gap-2.5 mb-4 flex-wrap">
+                  {cats.map(c => <button key={c} onClick={() => setActiveCategory(c)} className={`shrink-0 px-3.5 py-2 rounded-full text-[11px] font-semibold capitalize transition-colors ${activeCategory === c ? "bg-accent text-white" : "bg-surface-2 text-text-muted hover:text-text-secondary"}`}>{c}</button>)}
                 </div>
-                <div className="space-y-1">
+                <div className="space-y-1.5">
                   {filtered.map(a => (
                     <button key={a.id} onClick={() => handleAction(a)} disabled={aiLoading}
-                      className="w-full flex items-center gap-3.5 px-3 py-2.5 rounded-xl text-left hover:bg-surface-2 transition-colors group disabled:opacity-40">
+                      className="w-full flex items-center gap-4 px-4 py-3 rounded-xl text-left hover:bg-surface-2 transition-colors group disabled:opacity-40">
                       <span className="grid place-items-center w-9 h-9 shrink-0 rounded-xl bg-surface-2 text-base group-hover:bg-accent-dim transition-colors">{a.icon}</span><span className="text-[13px] text-text-secondary font-medium group-hover:text-text-primary transition-colors">{a.label}</span>
                     </button>
                   ))}
@@ -465,25 +690,43 @@ export default function App() {
 
         {/* AI Chat */}
         <div className="flex flex-col">
-          <div className="h-14 flex items-center px-6 text-[13px] font-semibold text-text-primary tracking-tight shrink-0">
+          <div className="h-16 flex items-center px-7 text-[13px] font-semibold text-text-primary tracking-tight shrink-0">
             <MessageSquare size={15} className="mr-2.5 text-accent" /> {orKey ? "AI Assistant" : "System Chat"}
             {aiLoading && <span className="ml-2.5 inline-flex items-center gap-1.5 text-accent text-[11px] font-medium"><span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />thinking</span>}
           </div>
-          <div ref={chatScrollRef} className="px-5 space-y-3 pb-2">
+          <div ref={chatScrollRef} className="px-6 space-y-5 pb-3">
             {chatMessages.length === 0 && <p className="text-[12.5px] text-text-muted py-2 px-1 font-medium leading-relaxed">{orKey ? "Tap a suggestion or quick action, or just ask anything about the meeting." : "Chat with the system."}</p>}
             {chatMessages.map(m => (
-              <div key={m.id} className={`animate-fade-in px-4 py-3 rounded-2xl text-[13px] leading-relaxed ${m.role === "user" ? "bg-accent text-white ml-8 rounded-br-md" : "bg-surface-1 border border-border text-text-primary mr-8 rounded-bl-md shadow-[0_2px_12px_-6px_rgba(14,21,37,0.12)]"}`}>
-                <div className={`text-[9.5px] font-bold mb-1 tracking-wide uppercase ${m.role === "user" ? "text-white/70" : "text-text-muted"}`}>{m.role === "user" ? "You" : "AI"}</div>
-                <div className="whitespace-pre-wrap font-medium">{m.text}</div>
+              <div key={m.id} className={`animate-fade-in flex flex-col ${m.role === "user" ? "items-end" : "items-start"}`}>
+                <div className={`text-[9.5px] font-bold mb-1.5 px-1 tracking-wide uppercase text-text-muted`}>{m.role === "user" ? "You" : "AI assistant"}</div>
+                {m.role === "user" ? (
+                  <div className="md-invert max-w-[88%] px-5 py-3.5 rounded-2xl rounded-br-md bg-accent text-white shadow-[0_4px_16px_-6px_var(--color-accent-glow)]">
+                    <Markdown text={m.text} />
+                  </div>
+                ) : (
+                  <div className="max-w-[92%] px-5 py-4 rounded-2xl rounded-bl-md bg-surface-1 border border-border text-text-primary shadow-[0_2px_14px_-8px_rgba(14,21,37,0.18)]">
+                    <Markdown text={m.text} />
+                  </div>
+                )}
               </div>
             ))}
+            {aiLoading && (
+              <div className="flex flex-col items-start animate-fade-in">
+                <div className="text-[9.5px] font-bold mb-1.5 px-1 tracking-wide uppercase text-text-muted">AI assistant</div>
+                <div className="px-5 py-4 rounded-2xl rounded-bl-md bg-surface-1 border border-border inline-flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse [animation-delay:150ms]" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse [animation-delay:300ms]" />
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
 
       {/* Chat composer — pinned */}
-      <div className="p-5 border-t border-border shrink-0">
-        <div className="field flex gap-2 items-center pl-4 pr-2 py-2">
+      <div className="p-6 border-t border-border shrink-0">
+        <div className="field flex gap-2.5 items-center pl-4 pr-2.5 py-2.5">
           <input value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => e.key === "Enter" && handleChat()}
             placeholder={orKey ? "Ask the AI anything..." : "Type a message..."}
             className="flex-1 bg-transparent text-[13px] text-text-primary placeholder-text-muted outline-none font-medium" />
@@ -493,70 +736,44 @@ export default function App() {
     </div>
   );
 
-  return (
-    <div className="h-screen flex flex-col text-text-primary">
-      {/* === TOP BAR === */}
-      <header className="h-20 bg-surface-1/80 backdrop-blur-xl border-b border-border flex items-center justify-between px-8 shrink-0 gap-6">
-        {/* Left: brand + Connect/Stop */}
-        <div className="flex items-center gap-5 shrink-0">
-          <div className="flex items-center gap-3 pr-1">
-            <span className="relative flex items-center justify-center w-2.5 h-2.5">
-              <span className={`w-2.5 h-2.5 rounded-full ${dot} ${status === "connected" ? "animate-pulse-glow" : ""}`} />
-            </span>
-            <span className="text-[17px] font-semibold tracking-tight">Fireflies <span className="text-accent">Live</span></span>
-          </div>
-          <div className="h-7 w-px bg-border" />
-          <div className="flex items-center gap-2.5">
-            <button onClick={handleConnect} disabled={status === "connecting" || status === "connected" || (useLive && !selectedMeeting)}
-              className="btn btn-primary btn-lg">
-              <Play size={15} /> Connect
-            </button>
-            <button onClick={() => connRef.current?.disconnect()} disabled={status !== "connected"} className="btn btn-secondary btn-lg">
-              <Square size={13} /> Stop
-            </button>
-          </div>
-        </div>
+  const statusLabel = status === "connected" ? "Connected" : status === "connecting" ? "Connecting…" : status === "error" ? "Error" : "Idle";
 
-        {/* Right: view switcher + live toggle */}
-        <div className="flex items-center gap-4 shrink-0">
-          <div className="segmented" role="tablist" aria-label="View mode">
-            <button role="tab" aria-selected={viewMode === "transcript"} data-active={viewMode === "transcript"} onClick={() => setViewMode("transcript")} className="segmented-item"><FileText size={14} /> Transcript</button>
-            <button role="tab" aria-selected={viewMode === "split"} data-active={viewMode === "split"} onClick={() => setViewMode("split")} className="segmented-item"><Columns size={14} /> Split</button>
-            <button role="tab" aria-selected={viewMode === "chat"} data-active={viewMode === "chat"} onClick={() => setViewMode("chat")} className="segmented-item"><Sparkles size={14} /> Chat</button>
-          </div>
-          <div className="h-7 w-px bg-border" />
-          <label className="flex items-center gap-2 text-[12px] text-text-secondary font-medium cursor-pointer select-none">
-            <input type="checkbox" checked={useLive} onChange={e => setUseLive(e.target.checked)} className="w-4 h-4 rounded border-border accent-accent cursor-pointer" />
-            <Radio size={13} className={useLive ? "text-accent" : "text-text-muted"} /> Live API
-          </label>
-        </div>
-      </header>
+  // ── Active Meetings popover (top-right control) ────────────────
+  const activeMeetingsControl = (
+    <div className="relative">
+      <button onClick={() => setMeetingsOpen(o => !o)}
+        className={`btn btn-secondary btn-lg ${meetingsOpen ? "border-border-hover text-text-primary" : ""}`}>
+        <Radio size={15} className="text-accent" /> Active meetings
+        {activeMeetings.length > 0 && <span className="ml-0.5 px-2 py-0.5 rounded-full bg-accent text-white text-[10px] font-bold leading-none">{activeMeetings.length}</span>}
+        <ChevronDown size={14} className={`transition-transform ${meetingsOpen ? "rotate-180" : ""}`} />
+      </button>
 
-      {/* === SESSION BAR: active sessions + manual ID === */}
-      <div className="bg-surface-1/50 border-b border-border px-8 py-5 shrink-0">
-        <div className="flex items-start gap-6 flex-wrap">
-          {/* Active sessions */}
-          <div className="flex-1 min-w-[320px]">
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2 text-[11px] font-semibold text-text-secondary uppercase tracking-wider">
-                <Radio size={13} className="text-accent" /> Active meetings
-                {activeMeetings.length > 0 && <span className="ml-1 px-2 py-0.5 rounded-full bg-accent-dim text-accent text-[10px] font-bold normal-case tracking-normal">{activeMeetings.length}</span>}
+      {meetingsOpen && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setMeetingsOpen(false)} aria-hidden />
+          <div className="popover animate-pop-in absolute right-0 top-[calc(100%+12px)] z-40 w-[420px] max-w-[calc(100vw-3rem)] p-7">
+            {/* header row */}
+            <div className="flex items-center justify-between mb-5">
+              <span className="text-[12px] font-semibold text-text-secondary uppercase tracking-wider">Active meetings</span>
+              <div className="flex items-center gap-1">
+                <button onClick={loadMeetings} disabled={!ffKey || loadingMeetings} className="btn btn-ghost btn-icon-sm" title="Refresh meetings">
+                  <RefreshCw size={15} className={loadingMeetings ? "animate-spin" : ""} />
+                </button>
+                <button onClick={() => setMeetingsOpen(false)} className="btn btn-ghost btn-icon-sm" title="Close"><X size={15} /></button>
               </div>
-              <button onClick={loadMeetings} disabled={!ffKey || loadingMeetings} className="btn btn-ghost btn-sm" title="Refresh meetings">
-                <RefreshCw size={13} className={loadingMeetings ? "animate-spin" : ""} /> Refresh
-              </button>
             </div>
 
+            {/* list */}
             {loadingMeetings ? (
-              <div className="flex items-center gap-3 text-[13px] text-text-muted font-medium px-1 py-3">
-                <RefreshCw size={15} className="animate-spin text-accent" /> Scanning for active meetings…
+              <div className="flex items-center gap-3 text-[13px] text-text-muted font-medium px-1 py-6 justify-center">
+                <RefreshCw size={15} className="animate-spin text-accent" /> Scanning…
               </div>
             ) : activeMeetings.length > 0 ? (
-              <div className="grid gap-2.5" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))" }}>
+              <div className="space-y-3 max-h-[320px] overflow-y-auto -mx-1 px-1">
                 {activeMeetings.map(m => {
                   const isSel = selectedMeeting?.id === m.id;
                   return (
-                    <div key={m.id} className={`card-soft flex items-center gap-3 p-3.5 transition-colors ${isSel ? "ring-2 ring-accent/40" : ""}`}>
+                    <div key={m.id} className={`card-soft flex items-center gap-4 p-4 ${isSel ? "ring-2 ring-accent/40" : ""}`}>
                       <span className="grid place-items-center w-10 h-10 shrink-0 rounded-xl bg-accent-dim text-accent">
                         <span className="relative flex w-2.5 h-2.5"><span className="absolute inline-flex w-full h-full rounded-full bg-accent opacity-60 animate-ping" /><span className="relative inline-flex rounded-full w-2.5 h-2.5 bg-accent" /></span>
                       </span>
@@ -564,7 +781,7 @@ export default function App() {
                         <p className="text-[13px] font-semibold text-text-primary truncate">{m.title || m.id.slice(-8)}</p>
                         <p className="text-[11px] text-text-muted font-medium mt-0.5">Live now</p>
                       </div>
-                      <button onClick={() => startConnection(m)} disabled={status === "connecting" || status === "connected"} className="btn btn-primary btn-sm shrink-0">
+                      <button onClick={() => { startConnection(m); setMeetingsOpen(false); }} disabled={status === "connecting" || status === "connected"} className="btn btn-primary btn-sm shrink-0">
                         <Play size={12} /> Connect
                       </button>
                     </div>
@@ -572,44 +789,98 @@ export default function App() {
                 })}
               </div>
             ) : (
-              <p className="text-[13px] text-text-muted font-medium px-1 py-3">
-                {ffKey ? "No active meetings right now. Refresh, pick a recent one, or paste an ID." : "Add your Fireflies key to auto-detect live meetings."}
+              <p className="text-[13px] text-text-muted font-medium px-1 py-5 text-center">
+                {ffKey ? "No active meetings right now. Refresh, or paste a meeting ID below." : "Add your Fireflies key to auto-detect live meetings."}
               </p>
             )}
-            {meetingStatus && <p className="text-[11px] text-text-muted font-medium mt-2.5 px-1">{meetingStatus}</p>}
-          </div>
 
-          {/* Recent + manual ID */}
-          <div className="w-[320px] shrink-0 space-y-3">
-            <div className="space-y-2">
-              <span className="block text-[11px] font-semibold text-text-secondary uppercase tracking-wider">Recent meetings</span>
-              <select value={selectedMeeting?.id || ""} onChange={e => { const m = meetings.find(x => x.id === e.target.value); if (m) { setSelectedMeeting(m); setMeetingStatus(""); } }}
-                className="field px-3.5 py-2.5 h-11 cursor-pointer truncate">
-                <option value="">{meetings.length === 0 ? "Load meetings to begin" : "Select a meeting…"}</option>
-                {activeMeetings.length > 0 && <optgroup label="Active now">{activeMeetings.map(m => <option key={m.id} value={m.id}>{m.title || m.id.slice(-8)}</option>)}</optgroup>}
-                {pastMeetings.length > 0 && <optgroup label="Recent">{pastMeetings.slice(0, 12).map(m => <option key={m.id} value={m.id}>{new Date(m.date).toLocaleDateString("en-GB", { day: "numeric", month: "short" })} - {m.title || m.id.slice(-8)}</option>)}</optgroup>}
-              </select>
-            </div>
-            <div className="space-y-2">
-              <span className="block text-[11px] font-semibold text-text-secondary uppercase tracking-wider">Or paste a meeting ID</span>
-              <div className="field flex items-center gap-2 pl-3.5 pr-2 py-2">
-                <input placeholder="Paste meeting ID" value={manualId} onChange={e => setManualId(e.target.value)} onKeyDown={e => e.key === "Enter" && useManualId()}
+            {/* manual ID */}
+            <div className="mt-5 pt-5 border-t border-border space-y-2.5">
+              <span className="block text-[11px] font-semibold text-text-secondary uppercase tracking-wider">Paste a meeting ID</span>
+              <div className="field flex items-center gap-2.5 pl-4 pr-2.5 py-2.5">
+                <input placeholder="Meeting ID…" value={manualId} onChange={e => setManualId(e.target.value)} onKeyDown={e => e.key === "Enter" && useManualId()}
                   className="flex-1 bg-transparent text-[13px] text-text-primary placeholder-text-muted outline-none font-medium min-w-0" />
                 <button onClick={useManualId} disabled={!manualId.trim()} className="btn btn-secondary btn-sm shrink-0">Set</button>
               </div>
+              {selectedMeeting && (
+                <button onClick={() => { handleConnect(); setMeetingsOpen(false); }} disabled={status === "connecting" || status === "connected"} className="btn btn-primary btn-sm w-full mt-1.5">
+                  <Play size={12} /> Connect to “{selectedMeeting.title || selectedMeeting.id.slice(-8)}”
+                </button>
+              )}
+            </div>
+            {meetingStatus && <p className="text-[11px] text-text-muted font-medium mt-4 px-1 leading-relaxed">{meetingStatus}</p>}
+          </div>
+        </>
+      )}
+    </div>
+  );
+
+  return (
+    <div className="h-screen flex flex-col text-text-primary">
+      {/* === OUTER FRAME: centered, generous horizontal padding === */}
+      <div className="flex-1 flex flex-col min-h-0 w-full max-w-[1700px] mx-auto px-8 lg:px-14 xl:px-20">
+        {/* === TOP BAR === */}
+        <header className="h-24 flex items-center justify-between shrink-0 gap-8">
+          {/* Left: brand + status pill (with inline Stop when connected) */}
+          <div className="flex items-center gap-4 shrink-0 min-w-0">
+            <span className="text-[18px] font-semibold tracking-tight whitespace-nowrap">Fireflies <span className="text-accent">Live</span></span>
+            <div className="flex items-center gap-2 pl-3.5 pr-1.5 h-9 rounded-full bg-surface-1 border border-border shrink-0">
+              <span className="relative flex items-center justify-center w-2.5 h-2.5">
+                <span className={`w-2.5 h-2.5 rounded-full ${dot} ${status === "connected" ? "animate-pulse-glow" : ""}`} />
+              </span>
+              <span className="text-[12px] font-semibold text-text-secondary tracking-tight">{statusLabel}</span>
+              {status === "connected" && (
+                <button onClick={() => connRef.current?.disconnect()} className="btn btn-ghost btn-sm ml-0.5 !h-7 !px-2.5 text-rose-600 hover:!text-rose-600 hover:!bg-rose-500/10" title="Stop streaming">
+                  <Square size={11} /> Stop
+                </button>
+              )}
             </div>
           </div>
-        </div>
-      </div>
 
-      {/* === MAIN === */}
-      <div className="flex-1 flex overflow-hidden">
-        {showTranscript && transcriptColumn}
-        {showSidebar && (
-          <aside className={`flex flex-col shrink-0 bg-surface-1/60 min-h-0 ${viewMode === "chat" ? "flex-1 max-w-[760px] mx-auto w-full border-x border-border" : "w-[400px]"}`}>
-            {sidebar}
-          </aside>
-        )}
+          {/* Right: view switcher + Active Meetings */}
+          <div className="flex items-center gap-5 shrink-0">
+            <div className="segmented" role="tablist" aria-label="View mode">
+              <button role="tab" aria-selected={viewMode === "transcript"} data-active={viewMode === "transcript"} onClick={() => setViewMode("transcript")} className="segmented-item"><FileText size={14} /> Transcript</button>
+              <button role="tab" aria-selected={viewMode === "split"} data-active={viewMode === "split"} onClick={() => setViewMode("split")} className="segmented-item"><Columns size={14} /> Split</button>
+              <button role="tab" aria-selected={viewMode === "chat"} data-active={viewMode === "chat"} onClick={() => setViewMode("chat")} className="segmented-item"><Sparkles size={14} /> Chat</button>
+            </div>
+            <div className="h-7 w-px bg-border" />
+            {activeMeetingsControl}
+          </div>
+        </header>
+
+        {/* === MAIN WORKSPACE === */}
+        <div className="flex-1 flex min-h-0 pb-8 lg:pb-10">
+          <div className="flex-1 flex min-h-0 rounded-3xl border border-border bg-surface-1/60 backdrop-blur-sm overflow-hidden shadow-[0_24px_60px_-32px_rgba(14,21,37,0.22)]">
+            {/* Chat-only view: one centered reading column, full height */}
+            {viewMode === "chat" ? (
+              <div className="flex-1 flex justify-center min-h-0">
+                <aside className="flex flex-col w-full max-w-3xl min-h-0 border-x border-border">
+                  {sidebar}
+                </aside>
+              </div>
+            ) : (
+              <>
+                <div
+                  className="flex flex-col min-w-0 min-h-0"
+                  style={viewMode === "split" ? { width: `${splitPct}%` } : { flex: "1 1 0%" }}>
+                  {transcriptColumn}
+                </div>
+
+                {viewMode === "split" && (
+                  <>
+                    <div className="split-divider" onMouseDown={startResize} role="separator" aria-orientation="vertical" aria-label="Resize panels" title="Drag to resize">
+                      <span className="grip" />
+                    </div>
+                    <aside className="flex flex-col min-w-0 min-h-0 flex-1 bg-surface-1/40">
+                      {sidebar}
+                    </aside>
+                  </>
+                )}
+              </>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
