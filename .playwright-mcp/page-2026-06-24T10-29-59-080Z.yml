@@ -1,0 +1,119 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e4]:
+    - banner [ref=e5]:
+      - generic [ref=e6]:
+        - generic [ref=e7]: Fireflies Live
+        - generic [ref=e11]: Idle
+      - generic [ref=e12]:
+        - tablist "View mode" [ref=e13]:
+          - tab "Transcript" [ref=e14] [cursor=pointer]:
+            - img [ref=e15]
+            - text: Transcript
+          - tab "Split" [selected] [ref=e18] [cursor=pointer]:
+            - img [ref=e19]
+            - text: Split
+          - tab "Chat" [ref=e21] [cursor=pointer]:
+            - img [ref=e22]
+            - text: Chat
+        - button "Active meetings" [ref=e27] [cursor=pointer]:
+          - img [ref=e28]
+          - text: Active meetings
+          - img [ref=e34]
+    - generic [ref=e37]:
+      - main [ref=e39]:
+        - generic [ref=e40]:
+          - generic [ref=e41]:
+            - img [ref=e42]
+            - generic [ref=e45]: Live transcription
+          - generic [ref=e46]:
+            - button "Question mode" [ref=e47] [cursor=pointer]:
+              - img [ref=e48]
+              - text: Question mode
+            - button "Copy transcript" [ref=e51] [cursor=pointer]:
+              - img [ref=e52]
+            - button "Export session as Markdown" [ref=e55] [cursor=pointer]:
+              - img [ref=e56]
+        - generic [ref=e61]:
+          - img [ref=e63]
+          - heading "Listen in on a live meeting" [level=2] [ref=e69]
+          - paragraph [ref=e70]: We auto-detect your active Fireflies meetings. Pick one and hit Connect — or paste a meeting ID to jump straight in.
+          - generic [ref=e71]:
+            - generic [ref=e72]:
+              - img [ref=e74]
+              - generic [ref=e77]:
+                - paragraph [ref=e78]: Auto-detect active meetings
+                - paragraph [ref=e79]: Your live sessions appear in the panel — no setup needed.
+            - generic [ref=e80]:
+              - img [ref=e82]
+              - generic [ref=e84]:
+                - paragraph [ref=e85]: Pick one & hit Connect
+                - paragraph [ref=e86]: One click streams the transcript here in real time.
+            - generic [ref=e87]:
+              - img [ref=e89]
+              - generic [ref=e91]:
+                - paragraph [ref=e92]: Or paste a meeting ID
+                - paragraph [ref=e93]:
+                  - text: Grab it from the URL
+                  - code [ref=e94]: app.fireflies.ai/view/ID
+                  - text: ", then Set & Connect."
+      - separator "Resize panels" [ref=e95]
+      - complementary [ref=e97]:
+        - generic [ref=e98]:
+          - generic [ref=e99]:
+            - button "Agent configuration" [ref=e101]:
+              - generic [ref=e102]:
+                - img [ref=e103]
+                - text: Agent configuration
+              - img [ref=e106]
+            - generic [ref=e108]:
+              - generic [ref=e109]:
+                - generic [ref=e110]:
+                  - img [ref=e111]
+                  - text: Live feed
+                - generic "How often the AI refreshes suggestions" [ref=e113] [cursor=pointer]:
+                  - img [ref=e114]
+                  - combobox [ref=e117]:
+                    - option "Fast · 8s"
+                    - option "Normal · 12s" [selected]
+                    - option "Relaxed · 20s"
+                    - option "Slow · 30s"
+                    - option "Off"
+              - generic [ref=e118]:
+                - button "All" [ref=e119] [cursor=pointer]
+                - button "Ask" [ref=e120] [cursor=pointer]
+                - button "Do" [ref=e121] [cursor=pointer]
+                - button "Note" [ref=e122] [cursor=pointer]
+              - paragraph [ref=e124]: Suggestions stream in here as the conversation evolves — newest on top. Tap one to ask the AI.
+            - button "Code Palette" [ref=e126]:
+              - generic [ref=e127]:
+                - img [ref=e128]
+                - text: Code Palette
+              - img [ref=e131]
+            - generic [ref=e133]:
+              - button "Backend Terminal · PI Bridge online" [ref=e134]:
+                - generic [ref=e135]:
+                  - img [ref=e136]
+                  - text: Backend Terminal · PI
+                  - generic "Bridge online" [ref=e138]
+                - img [ref=e140]
+              - generic [ref=e142]:
+                - generic [ref=e144]: Delegate shell tasks to your machine. Bridge runs on 127.0.0.1.
+                - generic [ref=e145]:
+                  - generic [ref=e146]:
+                    - img [ref=e147]
+                    - textbox "Type a shell command…" [ref=e149]
+                    - button "Send command" [ref=e150] [cursor=pointer]:
+                      - img [ref=e151]
+                  - button "Route through PI" [ref=e155] [cursor=pointer]: Route through PI
+            - generic [ref=e158]:
+              - generic [ref=e159]:
+                - img [ref=e160]
+                - text: AI Assistant
+              - paragraph [ref=e163]: Tap a suggestion or quick action, or just ask anything about the meeting.
+          - generic [ref=e165]:
+            - textbox "Ask the AI anything..." [ref=e166]
+            - button [ref=e167] [cursor=pointer]:
+              - img [ref=e168]
+  - generic:
+    - generic:
+      - region "Notifications alt+T"

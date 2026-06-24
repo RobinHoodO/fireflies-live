@@ -278,7 +278,7 @@ export default function App() {
   const [agentContext, setAgentContext] = useState("");
   const [aiModel, setAiModel] = useState("deepseek/deepseek-chat");
   const [viewMode, setViewMode] = useState<"split" | "transcript" | "chat">("split");
-  const [splitPct, setSplitPct] = useState(62);
+  const [splitPct, setSplitPct] = useState(56);
   const [pulseMs, setPulseMs] = useState(12000);
   // View-only state for the suggestions feed: collapse/expand + type filter.
   const [suggExpanded, setSuggExpanded] = useState(false);
@@ -301,6 +301,8 @@ export default function App() {
   const [meetingsOpen, setMeetingsOpen] = useState(false);
   // Presentation-only: Backend Terminal · PI section open/closed.
   const [showTerminal, setShowTerminal] = useState(true);
+  // Presentation-only: Agent configuration section open/closed (collapsed by default to save space).
+  const [showConfig, setShowConfig] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null); const chatScrollRef = useRef<HTMLDivElement>(null);
   const connRef = useRef<{ connect: () => Promise<void>; disconnect: () => void } | null>(null);
   const lastSpeakerRef = useRef(""); const lineCounter = useRef(0); const lastSuggestRef = useRef(0); const lastAnswerRef = useRef(0);
@@ -593,11 +595,14 @@ export default function App() {
 
   // ── Config / context panel ─────────────────────────────────────
   const configPanel = (
-    <div className="border-b border-border px-9 py-9 space-y-9">
-      <div className="flex items-center gap-2.5 text-[13px] font-semibold text-text-primary tracking-tight">
-        <Settings2 size={15} className="text-accent" /> Agent configuration
-      </div>
-
+    <div className="border-b border-border">
+      <button onClick={() => setShowConfig(v => !v)}
+        className="w-full min-h-16 flex items-center justify-between px-9 py-5 text-[13px] font-semibold text-text-primary tracking-tight hover:bg-surface-2/60 transition-colors">
+        <div className="flex items-center gap-2.5"><Settings2 size={15} className="text-accent" /> Agent configuration</div>
+        {showConfig ? <ChevronUp size={16} className="text-text-muted" /> : <ChevronDown size={16} className="text-text-muted" />}
+      </button>
+      {showConfig && (
+      <div className="px-9 pb-9 space-y-9">
       {/* Agent context modes */}
       <div className="space-y-4">
         <div className="flex items-center justify-between gap-3">
@@ -652,6 +657,8 @@ export default function App() {
           ))}
         </div>
       </div>
+      </div>
+      )}
     </div>
   );
 
@@ -1034,7 +1041,7 @@ export default function App() {
             {/* Chat-only view: one centered reading column, full height */}
             {viewMode === "chat" ? (
               <div className="flex-1 flex justify-center min-h-0">
-                <aside className="flex flex-col w-full max-w-3xl min-h-0 border-x border-border">
+                <aside className="flex flex-col w-full max-w-3xl min-h-0 border-x border-border px-6">
                   {sidebar}
                 </aside>
               </div>
@@ -1051,7 +1058,7 @@ export default function App() {
                     <div className="split-divider" onMouseDown={startResize} role="separator" aria-orientation="vertical" aria-label="Resize panels" title="Drag to resize">
                       <span className="grip" />
                     </div>
-                    <aside className="flex flex-col min-w-0 min-h-0 flex-1 bg-surface-1/40">
+                    <aside className="flex flex-col min-w-0 min-h-0 flex-1 bg-surface-1/40 px-6">
                       {sidebar}
                     </aside>
                   </>
