@@ -38,24 +38,28 @@ Status legend: ✅ done · 🟡 in progress · ⬜ planned
 - ✅ View modes: Transcript / Split / Chat; resizable split; full-screen centered chat.
 - 🟡 Suggestions: filter by type (question/action/insight) + expand/collapse so the
   feed shows only the newest/most-relevant by default.
+- ✅ Suggestions filter by type + expand/collapse (newest/most-relevant by default).
+- ✅ Export meeting (transcript + suggestions + chat) to Markdown.
+- ✅ AI-offline state in-UI when `OPENROUTER_API` is missing.
 - ⬜ Persist session (transcript + suggestions + config) to localStorage; restore on reload.
-- ⬜ Export meeting (transcript + suggestions + chat) to Markdown.
 - ⬜ Keyboard shortcuts (connect, toggle question mode, focus chat, switch views).
-- ⬜ Surface OpenRouter key status in-UI (clear "AI offline — set OPENROUTER_API" state).
 - ⬜ Sentiment / key-moments flags wired to real behavior (currently inert toggles).
 
-## Phase 3 — Backend delegation bridge (⬜ planned, security-sensitive)
+## Phase 3 — Backend delegation bridge (🟡 MVP shipped, security-sensitive)
 
 Goal: when Fireflies Live is open, spin up a **localhost-only** companion server the
 frontend can use to delegate work to **PI** (terminal agent) with full system access.
 
-- ⬜ Local Node/Bun WS server, bound to `127.0.0.1`, started/stopped with the app session.
-- ⬜ Command protocol: frontend emits an intent → server relays to PI.
-- ⛔ **Guardrails (required before any exec):** per-command user confirmation, an
-  allowlist of permitted operations, an audit log, and a hard kill-switch. No
-  unconfirmed arbitrary execution. Never expose the port beyond loopback.
-- ⬜ "Delegate to PI" affordance from chat / quick actions / suggestions.
-- ⬜ Stream PI output back into a backend-terminal pane that only mounts while connected.
+- ✅ Local Node server (`server/bridge.mjs`), bound to `127.0.0.1`, spawned by Vite
+  (lives only while the dev server / app is open), `/bridge` proxy.
+- ✅ Command protocol: NDJSON streaming (`start`/`out`/`err`/`exit`); optional routing
+  through a configurable PI command (`usePI` + `piCmd`).
+- ✅ **Guardrails:** in-UI per-command confirmation, a denylist of catastrophic
+  patterns (rm -rf /, fork bombs, pipe-to-shell, force-push, …), output cap + timeout,
+  audit log (`server/audit.log`), loopback-only bind.
+- ✅ Backend-terminal pane in the sidebar with online/offline status and live output.
+- ⬜ Upgrade denylist → allowlist + kill-switch before any non-local/multi-user use.
+- ⬜ "Delegate to PI" affordance directly from chat / suggestions / quick actions.
 
 ## Phase 4 — Chrome extension form factor (⬜ planned)
 

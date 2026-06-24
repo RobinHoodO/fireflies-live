@@ -22,8 +22,8 @@ See [ROADMAP.md](./ROADMAP.md) for phasing.
 | Real transcript-driven suggestions | ✅ | Throttled pulse |
 | Configurable pulse rate | ✅ | 8/12/20/30s / off |
 | Suggestion history feed (newest-first) | ✅ | Deduped, capped 100 |
-| Suggestion type filter (question/action/insight) | 🟡 | Click to filter |
-| Suggestion expand/collapse (show newest/most-relevant) | 🟡 | Avoid overlong feed |
+| Suggestion type filter (question/action/insight) | ✅ | Click to filter |
+| Suggestion expand/collapse (show newest/most-relevant) | ✅ | Show more/less, ~5 default |
 | Question mode (live "say this" draft) | ✅ | Toggle; banner over transcript |
 | Agent-context preset modes | ✅ | Clickable chips |
 | AI-proposed modes from meeting | ✅ | "Suggest modes" button |
@@ -42,16 +42,17 @@ See [ROADMAP.md](./ROADMAP.md) for phasing.
 | Resizable split divider | ✅ | Drag to set ratio |
 | Full-screen centered chat | ✅ | Chat view |
 | Contextual Stop (only when connected) | ✅ | In status pill |
+| Export to Markdown | ✅ | Transcript + suggestions + chat |
+| AI-offline / key-missing state | ✅ | Note when OPENROUTER_API missing |
+| Granular OpenRouter model picker | ✅ | ~22 models, grouped optgroups |
 | Session persistence (localStorage) | ⬜ | Phase 2 |
-| Export to Markdown | ⬜ | Phase 2 |
 | Keyboard shortcuts | ⬜ | Phase 2 |
-| AI-offline / key-missing state | ⬜ | Phase 2 |
 
 ## Platform / backend
 | Feature | Status | Notes |
 |---|---|---|
-| PI backend delegation bridge | ⬜ | Phase 3, localhost-only + guardrails |
-| Backend terminal pane (mounts when live) | ⬜ | Phase 3 |
+| PI backend delegation bridge | ✅ | localhost-only, denylist + confirm + audit |
+| Backend terminal pane | ✅ | Sidebar pane, online/offline, live output |
 | Chrome MV3 side-panel extension | ⬜ | Phase 4 |
 | One-click "Join Live" from meeting tab | ⬜ | Phase 4 |
 | Tests + CI | ⬜ | Phase 5 |
