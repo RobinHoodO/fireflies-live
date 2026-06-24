@@ -1,0 +1,28 @@
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body { font-family: 'Manrope', system-ui, sans-serif; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+#root { min-height: 100vh; }
+::selection { background: var(--ac-tint2, oklch(0.93 0.05 242)); }
+
+.fl-scroll { scrollbar-width: thin; scrollbar-color: oklch(0.85 0.01 250) transparent; }
+.fl-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
+.fl-scroll::-webkit-scrollbar-thumb { background: oklch(0.88 0.008 250); border-radius: 99px; border: 3px solid transparent; background-clip: content-box; }
+.fl-scroll::-webkit-scrollbar-thumb:hover { background: oklch(0.8 0.01 250); background-clip: content-box; }
+
+@keyframes fl-pulse { 0% { transform: scale(1); opacity: .55; } 70% { transform: scale(2.6); opacity: 0; } 100% { opacity: 0; } }
+@keyframes fl-blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+@keyframes fl-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes fl-slide { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes fl-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes fl-pop { from { opacity: 0; transform: translateY(-6px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes fl-think { 0%, 80%, 100% { transform: scale(.6); opacity: .4; } 40% { transform: scale(1); opacity: 1; } }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+
+/* hover/focus affordances the inline styles can't express */
+.fl-hover-soft:hover { background: oklch(0.98 0.004 250) !important; }
+.fl-divider:hover > div { background: var(--ac, oklch(0.585 0.16 242)) !important; height: 78px !important; }
+.fl-focus:focus { border-color: var(--ac, oklch(0.585 0.16 242)) !important; box-shadow: 0 0 0 3px var(--ac-tint2, oklch(0.93 0.05 242)) !important; }
+.fl-composer:focus-within { border-color: var(--ac, oklch(0.585 0.16 242)); box-shadow: 0 0 0 3px var(--ac-tint2, oklch(0.93 0.05 242)); }
