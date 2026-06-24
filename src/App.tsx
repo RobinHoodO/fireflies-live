@@ -1,75 +1,61 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { QUICK_ACTIONS } from "./data/quickActions";
-import type { ChatMessage, FeatureFlags, ConnectionStatus } from "./types";
+import type { ChatMessage, ConnectionStatus } from "./types";
 import {
-  Mic, Play, Square, Send, Copy, Check, Lightbulb, Command,
-  ChevronDown, ChevronUp, MessageSquare, RefreshCw, HelpCircle, Zap, Eye,
-  Sparkles, Settings2, Radio, Columns, FileText, Cpu, Plug, Search,
-  X, Wand2, ArrowRight, Gauge, Terminal, Download, AlertTriangle,
+  Mic, Radio, Copy, Download, Sparkles, SlidersHorizontal, Lightbulb, Gauge,
+  Terminal, Plug, Search, Send, MessageSquare, ChevronDown, X, RefreshCw,
+  Columns2, FileText, Check, Zap, HelpCircle, ArrowRight, Square, Play, Settings, Wand2,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-const SPEAKER_COLORS = [
-  "text-emerald-600", "text-sky-600", "text-amber-600", "text-rose-600",
-  "text-violet-600", "text-cyan-600", "text-orange-600", "text-fuchsia-600",
-];
-
+// ── Helpers ───────────────────────────────────────────────────────
 function speakerColor(name: string) {
+  if (name === "You") return "text-accent";
   let hash = 0;
   for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
-  return SPEAKER_COLORS[Math.abs(hash) % SPEAKER_COLORS.length];
+  return Math.abs(hash) % 2 === 0 ? "text-speaker-a" : "text-speaker-b";
 }
 
-// Tiny relative-time formatter for the suggestion feed timestamps.
 function relTime(ts: number): string {
   const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
   if (s < 8) return "just now";
   if (s < 60) return `${s}s ago`;
   const m = Math.floor(s / 60);
   if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  return `${h}h ago`;
+  return `${Math.floor(m / 60)}h ago`;
 }
 
-const PULSE_OPTIONS: { value: number; label: string }[] = [
+const PULSE_OPTIONS = [
   { value: 8000, label: "Fast · 8s" },
   { value: 12000, label: "Normal · 12s" },
   { value: 20000, label: "Relaxed · 20s" },
   { value: 30000, label: "Slow · 30s" },
-  { value: 0, label: "Off" },
+  { value: 0, label: "Paused" },
 ];
 
 type SuggestionType = "question" | "action" | "insight";
+interface Suggestion { text: string; type: SuggestionType; id: string; ts: number; }
 
-interface Suggestion {
-  text: string;
-  type: SuggestionType;
-  id: string;
-  ts: number;
-}
-
-const SUGGESTION_STYLE: Record<SuggestionType, { icon: typeof HelpCircle; bg: string; border: string; dot: string; icon_color: string; label: string }> = {
-  question: { icon: HelpCircle, bg: "bg-amber-dim", border: "border-amber-600/15 hover:border-amber-600/35", dot: "bg-amber-500", icon_color: "text-amber-600", label: "Ask" },
-  action:   { icon: Zap,         bg: "bg-accent-dim", border: "border-accent/15 hover:border-accent/35", dot: "bg-accent", icon_color: "text-accent", label: "Do" },
-  insight:  { icon: Eye,         bg: "bg-violet-dim", border: "border-violet-600/15 hover:border-violet-600/35", dot: "bg-violet-500", icon_color: "text-violet-600", label: "Note" },
+const SUGGESTION_STYLE: Record<SuggestionType, { icon: typeof HelpCircle; label: string; color: string; tile: string; border: string }> = {
+  question: { icon: HelpCircle, label: "Ask", color: "text-type-ask", tile: "bg-accent-tint text-type-ask", border: "hover:border-type-ask/50" },
+  action: { icon: Zap, label: "Do", color: "text-type-do", tile: "bg-type-do/10 text-type-do", border: "hover:border-type-do/50" },
+  insight: { icon: Lightbulb, label: "Note", color: "text-type-note", tile: "bg-type-note/10 text-type-note", border: "hover:border-type-note/50" },
 };
+
+const SUGG_FILTERS: { value: "all" | SuggestionType; label: string }[] = [
+  { value: "all", label: "All" }, { value: "question", label: "Ask" }, { value: "action", label: "Do" }, { value: "insight", label: "Note" },
+];
 
 interface MeetingOption { id: string; title: string; date: string; active: boolean; }
 
 async function fetchMeetings(apiKey: string): Promise<{ meetings: MeetingOption[]; raw: any }> {
-  const q = `query {
-    active_meetings { id title start_time end_time organizer_email }
-    transcripts(limit: 15) { id title date organizer_email }
-  }`;
+  const q = `query { active_meetings { id title start_time end_time organizer_email } }`;
   const r = await fetch("https://api.fireflies.ai/graphql", {
     method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }, body: JSON.stringify({ query: q }),
   });
   const d = await r.json();
-  console.log("Fireflies API response:", d);
   const active: MeetingOption[] = (d?.data?.active_meetings || []).map((m: any) => ({ id: m.id, title: m.title || "Untitled", date: m.start_time ? new Date(m.start_time).toISOString() : new Date().toISOString(), active: true }));
-  const past: MeetingOption[] = (d?.data?.transcripts || []).filter((t: any) => t.date).map((t: any) => ({ id: t.id, title: t.title || "Untitled", date: new Date(t.date).toISOString(), active: false }));
-  return { meetings: [...active, ...past], raw: d };
+  return { meetings: active, raw: d };
 }
 
 async function callAI(messages: { role: string; content: string }[], key: string, model = "deepseek/deepseek-chat"): Promise<string> {
@@ -81,7 +67,6 @@ async function callAI(messages: { role: string; content: string }[], key: string
   return d?.choices?.[0]?.message?.content || "Couldn't generate a response.";
 }
 
-// Real, transcript-driven suggestions (replaces the old random canned generator).
 async function fetchSuggestions(ctx: string, key: string, context: string, model: string): Promise<Suggestion[]> {
   const sys = `You are a real-time meeting copilot.${context ? ` Context: ${context}` : ""} Read the live transcript and surface up to 3 high-value, specific suggestions for the listener right now. Each item is one of: "question" (a sharp question to ask), "action" (a concrete task to do), or "insight" (something notable to remember). Respond ONLY with a JSON array, e.g. [{"type":"question","text":"..."}]. Each text under 12 words. No prose.`;
   const raw = await callAI([{ role: "system", content: sys }, { role: "user", content: `Transcript:\n${ctx}` }], key, model);
@@ -99,140 +84,70 @@ function connectLive(onLine: (speaker: string, text: string, final: boolean, key
       onStatus("connecting");
       try {
         const { io } = await import("socket.io-client");
-        socket = io("wss://api.fireflies.ai", {
-          path: "/ws/realtime",
-          transports: ["websocket"],
-          auth: {
-            token: `Bearer ${apiKey}`,
-            transcriptId: meetingId,
-          },
-        });
-
-        socket.onAny((event: string, ...args: any[]) => {
-          console.log("[Fireflies]", event, args);
-        });
-
-        socket.on("auth.success", () => {
-          console.log("Authenticated with Fireflies");
-        });
-
-        socket.on("auth.failed", (err: any) => {
-          console.error("Auth failed:", err);
-          onStatus("error");
-        });
-
-        socket.on("connection.established", () => {
-          console.log("Connection established, receiving transcription");
-          onStatus("connected");
-        });
-
-        socket.on("connection.error", (err: any) => {
-          console.error("Connection error:", err);
-          onStatus("error");
-        });
-
+        socket = io("wss://api.fireflies.ai", { path: "/ws/realtime", transports: ["websocket"], auth: { token: `Bearer ${apiKey}`, transcriptId: meetingId } });
+        socket.on("auth.failed", () => onStatus("error"));
+        socket.on("connection.established", () => onStatus("connected"));
+        socket.on("connection.error", () => onStatus("error"));
         socket.on("transcription.broadcast", (data: any) => {
-          // Fireflies nests the chunk under `payload`; top-level data.text is undefined.
           const p = data?.payload ?? data;
           const text = p?.text || "";
           if (!text) return;
-          // chunk_id is a stable, repeatedly-revised segment id — upsert by it, don't append per-event.
           onLine(p.speaker_name || "Speaker", text, true, `c${p.chunk_id}`);
         });
-
-        socket.on("disconnect", (reason: string) => {
-          console.log("Disconnected:", reason);
-          onStatus("disconnected");
-        });
-      } catch (e) {
-        console.error("Socket.IO failed:", e);
-        onStatus("error");
-      }
+        socket.on("disconnect", () => onStatus("disconnected"));
+      } catch { onStatus("error"); }
     },
-    disconnect() {
-      if (socket) { socket.disconnect(); socket = null; }
-      onStatus("disconnected");
-    },
+    disconnect() { if (socket) { socket.disconnect(); socket = null; } onStatus("disconnected"); },
   };
 }
 
 function connectDemo(onLine: (speaker: string, text: string, final: boolean, key?: string) => void, onStatus: (s: ConnectionStatus) => void) {
   const LINES: [string, string][] = [
-    ["Alice Chen", "Alright, let's kick off the sprint planning. We need to finalize the API integration timeline."],
-    ["Marcus Johnson", "I've been looking at the Fireflies API docs. The real-time WebSocket looks solid — we can stream live transcription."],
-    ["Sarah Kim", "What's the latency like? If we're building a live agent, every second counts."],
-    ["Marcus Johnson", "From the docs, it's about 1-2 seconds behind. Not bad for transcription."],
-    ["David Park", "I can wire up the Socket.IO client today. The auth flow is straightforward — just an API token and transcript ID."],
-    ["Alice Chen", "Great. Sarah, what about the AI suggestions feature? That's the core differentiator."],
-    ["Sarah Kim", "We can pipe the transcription stream directly into the LLM context. As each chunk arrives, we check for trigger phrases."],
-    ["Marcus Johnson", "What triggers are we thinking? Questions? Action items?"],
-    ["Sarah Kim", "Questions, deadlines, decisions, and any explicit hey can someone look up type requests."],
-    ["David Park", "Should we also listen for sentiment? Like if someone sounds frustrated or confused?"],
-    ["Alice Chen", "Yes, but let's ship the core features first. Transcription plus suggestions plus commands. We can add sentiment in v2."],
-    ["Marcus Johnson", "Agreed. I'll start on the command palette — that's the quick-action interface."],
-    ["Sarah Kim", "For the suggestions UI, I'm thinking a sidebar panel with real-time cards that update as the conversation evolves."],
-    ["David Park", "We should also add a whisper mode where the agent can DM the host privately instead of posting to everyone."],
-    ["Alice Chen", "Love that. Okay, action items: Marcus on command palette, Sarah on suggestions engine, David on Fireflies integration."],
-    ["Sarah Kim", "I'll also spike on the context window management. We don't want to blow past token limits on long meetings."],
-    ["Marcus Johnson", "Good call. What's the plan for the demo? We need something working by Friday."],
-    ["Alice Chen", "Minimal viable: live transcription feed plus command palette with at least 5 working actions. Suggestions can be simulated."],
-    ["David Park", "I can have the Fireflies connection working by tomorrow. Then we integrate."],
+    ["Maya Patel", "Thanks for hopping on. Before we dig in — the biggest thing for us right now is follow-up time. My CS team spends way too long writing post-call recaps."],
+    ["You", "That's exactly what we automate. Recaps drop in your inbox within a minute of the call ending."],
+    ["Maya Patel", "Good. The other pain is onboarding speed — we're scaling from 14 to 25 reps this year and ramping new hires fast is brutal."],
+    ["You", "Live coaching helps there. New reps get real-time prompts during calls, so they ramp on live deals, not roleplay."],
+    ["Maya Patel", "And pricing — I need something that scales with us. Not a flat number, a range with a growth ramp."],
+    ["You", "Totally. Let me anchor on the time saved first, then walk you through a ramp that matches your headcount plan."],
+    ["Diego Romero", "From an ops view, the integration matters too — does this sit inside our existing CRM or is it another tab?"],
+    ["You", "It writes straight back into your CRM. No new tab to babysit."],
   ];
   let running = false;
   return {
     async connect() {
-      running = true; onStatus("connecting"); await new Promise(r => setTimeout(r, 500)); onStatus("connected");
-      for (const [s, t] of LINES) { if (!running) break; const w = t.split(" "); for (let i = 0; i < w.length; i++) { if (!running) break; onLine(s, w.slice(0, i + 1).join(" "), i === w.length - 1); await new Promise(r => setTimeout(r, 55 + Math.random() * 70)); } await new Promise(r => setTimeout(r, 450 + Math.random() * 600)); }
-      if (running) onStatus("disconnected");
+      running = true; onStatus("connecting"); await new Promise(r => setTimeout(r, 1300)); onStatus("connected");
+      for (const [s, t] of LINES) { if (!running) break; const w = t.split(" "); for (let i = 0; i < w.length; i++) { if (!running) break; onLine(s, w.slice(0, i + 1).join(" "), i === w.length - 1); await new Promise(r => setTimeout(r, 40 + Math.random() * 55)); } await new Promise(r => setTimeout(r, 500 + Math.random() * 600)); }
     },
     disconnect() { running = false; onStatus("disconnected"); },
   };
 }
 
-// Curated OpenRouter models grouped by provider for granular choice. `group` drives <optgroup>.
 const AI_MODELS: { value: string; label: string; group: string }[] = [
-  // DeepSeek
-  { value: "deepseek/deepseek-chat", label: "DeepSeek Chat (fast, cheap)", group: "DeepSeek" },
-  { value: "deepseek/deepseek-r1", label: "DeepSeek R1 (reasoning)", group: "DeepSeek" },
-  // OpenAI
-  { value: "openai/gpt-4o-mini", label: "GPT-4o mini", group: "OpenAI" },
+  { value: "anthropic/claude-sonnet-4", label: "Claude Sonnet 4", group: "Anthropic" },
+  { value: "anthropic/claude-opus-4", label: "Claude Opus 4", group: "Anthropic" },
+  { value: "anthropic/claude-3.5-haiku", label: "Claude 3.5 Haiku", group: "Anthropic" },
   { value: "openai/gpt-4o", label: "GPT-4o", group: "OpenAI" },
-  { value: "openai/gpt-4.1", label: "GPT-4.1", group: "OpenAI" },
-  { value: "openai/gpt-4.1-mini", label: "GPT-4.1 mini", group: "OpenAI" },
-  { value: "openai/o1", label: "o1 (reasoning)", group: "OpenAI" },
-  { value: "openai/o3-mini", label: "o3-mini (reasoning)", group: "OpenAI" },
-  // Anthropic
-  { value: "anthropic/claude-3.7-sonnet", label: "Claude 3.7 Sonnet", group: "Anthropic" },
-  { value: "anthropic/claude-3.5-sonnet", label: "Claude 3.5 Sonnet", group: "Anthropic" },
-  { value: "anthropic/claude-3.5-haiku", label: "Claude 3.5 Haiku (fast)", group: "Anthropic" },
-  { value: "anthropic/claude-3-opus", label: "Claude 3 Opus", group: "Anthropic" },
-  // Google
-  { value: "google/gemini-2.0-flash-001", label: "Gemini 2.0 Flash", group: "Google" },
-  { value: "google/gemini-flash-1.5", label: "Gemini 1.5 Flash (fast, cheap)", group: "Google" },
-  { value: "google/gemini-pro-1.5", label: "Gemini 1.5 Pro", group: "Google" },
-  // Meta Llama
+  { value: "openai/gpt-4o-mini", label: "GPT-4o mini", group: "OpenAI" },
+  { value: "openai/o3", label: "o3", group: "OpenAI" },
+  { value: "google/gemini-2.5-pro", label: "Gemini 2.5 Pro", group: "Google" },
+  { value: "google/gemini-2.5-flash", label: "Gemini 2.5 Flash", group: "Google" },
+  { value: "deepseek/deepseek-chat", label: "DeepSeek V3", group: "DeepSeek" },
+  { value: "deepseek/deepseek-r1", label: "DeepSeek R1", group: "DeepSeek" },
   { value: "meta-llama/llama-3.3-70b-instruct", label: "Llama 3.3 70B", group: "Meta Llama" },
-  { value: "meta-llama/llama-3.1-70b-instruct", label: "Llama 3.1 70B", group: "Meta Llama" },
-  { value: "meta-llama/llama-3.1-405b-instruct", label: "Llama 3.1 405B", group: "Meta Llama" },
-  // Others
-  { value: "mistralai/mistral-large", label: "Mistral Large", group: "Other" },
-  { value: "qwen/qwen-2.5-72b-instruct", label: "Qwen 2.5 72B", group: "Other" },
-  { value: "x-ai/grok-2-1212", label: "Grok 2", group: "Other" },
 ];
+const MODEL_LABEL = (v: string) => AI_MODELS.find(m => m.value === v)?.label || v;
 
-// Preset agent modes the user can click; each sets the agentContext fed to every AI call.
 const AGENT_MODES: { label: string; context: string }[] = [
   { label: "Sales call", context: "You're supporting the host on a sales call. Surface objections, buying signals, pricing cues, and concise responses that move the deal forward." },
   { label: "Interview", context: "Help the host interview a candidate: propose sharp follow-up questions, flag vague or evasive answers, and track competencies." },
-  { label: "Standup / sync", context: "Track decisions, blockers, action items and their owners. Keep everything concise and actionable." },
+  { label: "Standup", context: "Track decisions, blockers, action items and their owners. Keep everything concise and actionable." },
   { label: "Negotiation", context: "Help the host negotiate: flag concessions, anchors, and suggested counter-offers in real time." },
-  { label: "1:1 / coaching", context: "Support a thoughtful 1:1: surface listening prompts, open questions, and gentle follow-ups." },
+  { label: "1:1", context: "Support a thoughtful 1:1: surface listening prompts, open questions, and gentle follow-ups." },
   { label: "Discovery", context: "Help the host run product discovery: surface user pain points, jobs-to-be-done, and probing questions." },
 ];
 
-// Ask the model to read the meeting and propose tailored agent modes (label + context).
 async function proposeModes(ctx: string, key: string, model: string): Promise<{ label: string; context: string }[]> {
-  const sys = `You are configuring a real-time meeting copilot. From the transcript, infer the meeting type and the host's likely goal. Propose up to 4 distinct "agent modes" — each a short label plus a one-sentence context instruction the copilot should adopt to best support the host. Respond ONLY as a JSON array: [{"label":"...","context":"..."}].`;
+  const sys = `You are configuring a real-time meeting copilot. From the transcript, infer the meeting type and the host's likely goal. Propose up to 4 distinct "agent modes" — each a short label plus a one-sentence context instruction. Respond ONLY as a JSON array: [{"label":"...","context":"..."}].`;
   const raw = await callAI([{ role: "system", content: sys }, { role: "user", content: `Transcript:\n${ctx}` }], key, model);
   try {
     const arr = JSON.parse(raw.slice(raw.indexOf("["), raw.lastIndexOf("]") + 1));
@@ -240,35 +155,28 @@ async function proposeModes(ctx: string, key: string, model: string): Promise<{ 
   } catch { return []; }
 }
 
-// Question mode: draft what the host should say in reply to the latest turn (or "—" if none needed).
 async function fetchLiveAnswer(ctx: string, key: string, context: string, model: string): Promise<string> {
   const sys = `You are a live meeting copilot helping the HOST respond.${context ? ` Context: ${context}` : ""} Look only at the most recent turns. If someone is asking the host a question or clearly expecting a response, draft a concise, natural reply (1-3 sentences) in the first person, ready to speak aloud. If no response is needed, reply with exactly "—". No preamble, no labels.`;
   const raw = await callAI([{ role: "system", content: sys }, { role: "user", content: `Transcript:\n${ctx}` }], key, model);
   return raw.trim();
 }
 
-// Rich-text renderer for AI output (fixes raw ** markdown showing as stars).
 function Markdown({ text }: { text: string }) {
   return <div className="md"><ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown></div>;
 }
 
+const FEATURE_FLAGS = ["Auto-suggest", "Sentiment", "Action items", "Live summary", "Speaker labels", "Profanity filter"];
+
+// ── App ───────────────────────────────────────────────────────────
 export default function App() {
   const [status, setStatus] = useState<ConnectionStatus>("disconnected");
-  const [statusMsg, setStatusMsg] = useState("");
   const [lines, setLines] = useState<{ speaker: string; text: string; isFinal: boolean; id: string }[]>([]);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
-  const [flags, setFlags] = useState<FeatureFlags>({
-    liveTranscription: true, aiSuggestions: true, autoActions: false,
-    codePalette: true, sentimentTracking: false, keyMoments: false,
-    commandMode: false, meetingNotes: true,
-  });
-  const [showPalette, setShowPalette] = useState(false);
-  const [activeCategory, setActiveCategory] = useState("all");
-  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [flags, setFlags] = useState<Record<string, boolean>>({ "Auto-suggest": true, "Sentiment": false, "Action items": true, "Live summary": true, "Speaker labels": true, "Profanity filter": false });
+  const [copiedTx, setCopiedTx] = useState(false);
   const [ffKey, setFfKey] = useState(""); const [orKey, setOrKey] = useState("");
-  const [useLive, setUseLive] = useState(true);
   const [meetings, setMeetings] = useState<MeetingOption[]>([]);
   const [selectedMeeting, setSelectedMeeting] = useState<MeetingOption | null>(null);
   const [loadingMeetings, setLoadingMeetings] = useState(false);
@@ -276,42 +184,37 @@ export default function App() {
   const [manualId, setManualId] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [agentContext, setAgentContext] = useState("");
+  const [agentMode, setAgentMode] = useState("General");
   const [aiModel, setAiModel] = useState("deepseek/deepseek-chat");
   const [viewMode, setViewMode] = useState<"split" | "transcript" | "chat">("split");
-  const [splitPct, setSplitPct] = useState(56);
+  const [splitPct, setSplitPct] = useState(60);
   const [pulseMs, setPulseMs] = useState(12000);
-  // View-only state for the suggestions feed: collapse/expand + type filter.
   const [suggExpanded, setSuggExpanded] = useState(false);
-  const [suggFilter, setSuggFilter] = useState<"all" | "question" | "action" | "insight">("all");
+  const [suggFilter, setSuggFilter] = useState<"all" | SuggestionType>("all");
   const [questionMode, setQuestionMode] = useState(false);
   const [liveAnswer, setLiveAnswer] = useState("");
   const [proposedModes, setProposedModes] = useState<{ label: string; context: string }[]>([]);
   const [proposingModes, setProposingModes] = useState(false);
-  // Backend bridge (localhost command runner / PI delegation)
+  const [activeTab, setActiveTab] = useState<"feed" | "chat" | "terminal">("feed");
+  const [configOpen, setConfigOpen] = useState(false);
+  const [meetingsOpen, setMeetingsOpen] = useState(false);
+  // Bridge
   const [bridgeOnline, setBridgeOnline] = useState(false);
   const [bridgeToken, setBridgeToken] = useState("");
   const [termInput, setTermInput] = useState("");
-  const [termLines, setTermLines] = useState<{ stream: "out" | "err" | "sys"; text: string }[]>([]);
+  const [termLines, setTermLines] = useState<{ stream: "out" | "err" | "sys" | "cmd"; text: string }[]>([]);
   const [termRunning, setTermRunning] = useState(false);
   const [usePI, setUsePI] = useState(false);
-  const [piCmd, setPiCmd] = useState("pi");
   const [pendingCmd, setPendingCmd] = useState<string | null>(null);
-  const termScrollRef = useRef<HTMLDivElement>(null);
-  // Presentation-only: Active Meetings popover open/closed (no data/logic).
-  const [meetingsOpen, setMeetingsOpen] = useState(false);
-  // Presentation-only: Backend Terminal · PI section open/closed.
-  const [showTerminal, setShowTerminal] = useState(true);
-  // Presentation-only: Agent configuration section open/closed (collapsed by default to save space).
-  const [showConfig, setShowConfig] = useState(false);
-  const scrollRef = useRef<HTMLDivElement>(null); const chatScrollRef = useRef<HTMLDivElement>(null);
+
+  const scrollRef = useRef<HTMLDivElement>(null); const chatScrollRef = useRef<HTMLDivElement>(null); const termScrollRef = useRef<HTMLDivElement>(null);
   const connRef = useRef<{ connect: () => Promise<void>; disconnect: () => void } | null>(null);
   const lastSpeakerRef = useRef(""); const lineCounter = useRef(0); const lastSuggestRef = useRef(0); const lastAnswerRef = useRef(0);
 
   useEffect(() => { fetch("/api/fireflies-key").then(r => r.json()).then(d => { if (d.ffKey) setFfKey(d.ffKey); if (d.orKey) setOrKey(d.orKey); if (d.bridgeToken) setBridgeToken(d.bridgeToken); }).catch(() => {}); }, []);
   useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" }); }, [lines]);
-  useEffect(() => { chatScrollRef.current?.scrollTo({ top: chatScrollRef.current.scrollHeight, behavior: "smooth" }); }, [chatMessages]);
+  useEffect(() => { chatScrollRef.current?.scrollTo({ top: chatScrollRef.current.scrollHeight, behavior: "smooth" }); }, [chatMessages, activeTab, viewMode]);
   useEffect(() => { termScrollRef.current?.scrollTo({ top: termScrollRef.current.scrollHeight }); }, [termLines]);
-  // Poll the local bridge so the UI can show online/offline (it only runs while the dev server is up).
   useEffect(() => {
     let alive = true;
     const ping = () => fetch("/bridge/health").then(r => r.ok).then(ok => { if (alive) setBridgeOnline(ok); }).catch(() => { if (alive) setBridgeOnline(false); });
@@ -325,21 +228,16 @@ export default function App() {
       const { meetings: opts, raw } = await fetchMeetings(ffKey);
       setMeetings(opts);
       const a = opts.find(m => m.active);
-      if (a) { setSelectedMeeting(a); setMeetingStatus(`Found ${opts.length} meetings, ${opts.filter(m=>m.active).length} active`); }
-      else if (opts.length > 0) { setMeetingStatus(`${opts.length} recent meetings loaded, none active right now`); }
-      else { setMeetingStatus("No meetings found. Paste your meeting ID below."); }
-      // Check for API errors
-      if (raw?.errors) { setMeetingStatus("API error: " + raw.errors[0]?.message); console.error(raw.errors); }
+      if (a) { setSelectedMeeting(a); setMeetingStatus(`${opts.length} active`); }
+      else { setMeetingStatus("No active meetings. Paste a meeting ID."); }
+      if (raw?.errors) setMeetingStatus("API error: " + raw.errors[0]?.message);
     } catch (e: any) { setMeetingStatus("Failed to load: " + (e.message || "unknown")); }
     setLoadingMeetings(false);
   };
+  useEffect(() => { if (ffKey) loadMeetings(); }, [ffKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-fetch active meetings as soon as the key arrives (on load / refresh).
-  useEffect(() => { if (ffKey && useLive) loadMeetings(); }, [ffKey]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Real-time suggestions: throttled LLM pass; new items prepend to a running feed (history kept, newest first).
   useEffect(() => {
-    if (!flags.aiSuggestions || !orKey || lines.length === 0 || pulseMs === 0) return;
+    if (!flags["Auto-suggest"] || !orKey || lines.length === 0 || pulseMs === 0) return;
     const now = Date.now();
     if (now - lastSuggestRef.current < pulseMs) return;
     lastSuggestRef.current = now;
@@ -348,13 +246,11 @@ export default function App() {
       if (!fresh.length) return;
       setSuggestions(prev => {
         const seen = new Set(prev.slice(0, 40).map(s => s.text.toLowerCase()));
-        const add = fresh.filter(s => !seen.has(s.text.toLowerCase()));
-        return [...add, ...prev].slice(0, 100); // newest first, capped
+        return [...fresh.filter(s => !seen.has(s.text.toLowerCase())), ...prev].slice(0, 40);
       });
     }).catch(() => {});
-  }, [lines, flags.aiSuggestions, orKey, agentContext, aiModel, pulseMs]);
+  }, [lines, flags, orKey, agentContext, aiModel, pulseMs]);
 
-  // Question mode: when on, live-draft what the host should say in reply to the latest turn.
   useEffect(() => {
     if (!questionMode || !orKey || lines.length === 0) return;
     const now = Date.now();
@@ -367,18 +263,16 @@ export default function App() {
   const useManualId = () => {
     if (!manualId.trim()) return;
     setSelectedMeeting({ id: manualId.trim(), title: "Manual meeting", date: new Date().toISOString(), active: true });
-    setMeetingStatus("Using manual ID: " + manualId.trim());
+    setMeetingStatus("Using manual ID");
   };
 
   const onTranscriptLine = useCallback((speaker: string, text: string, isFinal: boolean, key?: string) => {
     setLines(prev => {
-      // Live path: upsert by stable segment key (chunk_id) — server revises segments out of order.
       if (key != null) {
         const idx = prev.findIndex(l => l.id === key);
         if (idx >= 0) { const u = [...prev]; u[idx] = { ...u[idx], speaker, text, isFinal: true }; return u; }
         return [...prev, { speaker, text, isFinal: true, id: key }];
       }
-      // Demo path: word-streaming with speaker continuity.
       if (speaker === lastSpeakerRef.current && prev.length > 0 && !prev[prev.length - 1].isFinal) { const u = [...prev]; u[u.length - 1] = { ...u[u.length - 1], text, isFinal }; return u; }
       lastSpeakerRef.current = speaker; lineCounter.current++; return [...prev, { speaker, text, isFinal, id: `l${lineCounter.current}` }];
     });
@@ -388,22 +282,20 @@ export default function App() {
     const meeting = m ?? selectedMeeting;
     if (m) setSelectedMeeting(m);
     setLines([]); setChatMessages([]); setSuggestions([]); lastSpeakerRef.current = ""; lineCounter.current = 0;
-    connRef.current = (useLive && ffKey && meeting) ? connectLive(onTranscriptLine, setStatus, ffKey, meeting.id) : connectDemo(onTranscriptLine, setStatus);
+    connRef.current = (ffKey && meeting) ? connectLive(onTranscriptLine, setStatus, ffKey, meeting.id) : connectDemo(onTranscriptLine, setStatus);
     connRef.current.connect();
   };
   const handleConnect = () => startConnection();
+  const stop = () => connRef.current?.disconnect();
 
-  // Merge consecutive same-speaker segments into one paragraph; new line only on speaker change.
   const grouped = lines.reduce<typeof lines>((acc, l) => {
     const last = acc[acc.length - 1];
     if (last && last.speaker === l.speaker) acc[acc.length - 1] = { ...last, text: `${last.text} ${l.text}`, isFinal: l.isFinal };
     else acc.push({ ...l });
     return acc;
   }, []);
-
   const getCtx = () => grouped.map(l => `[${l.speaker}]: ${l.text}`).join("\n");
 
-  // Let the agent read the meeting and propose tailored modes the user can click.
   const handleProposeModes = async () => {
     if (!orKey || grouped.length === 0) return;
     setProposingModes(true);
@@ -411,23 +303,25 @@ export default function App() {
     setProposingModes(false);
   };
 
-  // Drag-to-resize the split between transcript and sidebar.
+  const pickMode = (label: string, context: string) => { setAgentMode(label); setAgentContext(context); };
+
   const startResize = (e: { preventDefault(): void }) => {
     e.preventDefault();
-    const onMove = (ev: MouseEvent) => setSplitPct(Math.min(80, Math.max(28, (ev.clientX / window.innerWidth) * 100)));
-    const onUp = () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
+    const onMove = (ev: MouseEvent) => setSplitPct(Math.min(74, Math.max(34, (ev.clientX / window.innerWidth) * 100)));
+    const onUp = () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); document.body.style.userSelect = ""; };
+    document.body.style.userSelect = "none";
     window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp);
   };
 
-  // Bridge: build the command (raw shell or routed through PI), confirm, then stream output.
-  const buildBridgeCmd = (input: string) => usePI ? `${piCmd} ${JSON.stringify(input)}` : input;
-  const requestRun = () => { if (!termInput.trim() || termRunning) return; setPendingCmd(buildBridgeCmd(termInput.trim())); };
+  // Bridge
+  const requestRun = () => { if (!termInput.trim() || termRunning) return; setPendingCmd(termInput.trim()); };
   const cancelPending = () => setPendingCmd(null);
   const confirmRun = async () => {
-    const cmd = pendingCmd; setPendingCmd(null);
-    if (!cmd) return;
+    const raw = pendingCmd; setPendingCmd(null);
+    if (!raw) return;
+    const cmd = usePI ? `pi ${JSON.stringify(raw)}` : raw;
     setTermInput(""); setTermRunning(true);
-    setTermLines(prev => [...prev, { stream: "sys", text: `$ ${cmd}` }]);
+    setTermLines(prev => [...prev, { stream: "cmd", text: `${usePI ? "pi $" : "$"} ${raw}` }]);
     try {
       const res = await fetch("/bridge/run", { method: "POST", headers: { "Content-Type": "application/json", "Authorization": `Bearer ${bridgeToken}` }, body: JSON.stringify({ cmd }) });
       const reader = res.body!.getReader(); const dec = new TextDecoder(); let buf = "";
@@ -448,683 +342,415 @@ export default function App() {
   };
 
   const handleSuggestion = async (s: Suggestion) => {
+    setActiveTab("chat");
     if (!orKey) return; setAiLoading(true);
-    const ctx = getCtx();
     const prompts: Record<SuggestionType, string> = {
-      question: `You are a meeting coach. Based on the transcript, the user is considering asking: "${s.text}". Write what they should say — 1-2 natural sentences they can speak aloud. Don't label it.`,
-      action: `You are a meeting assistant. Execute this: "${s.text}". Based on the transcript context, provide the result concisely.`,
-      insight: `You spotted this in the meeting: "${s.text}". Write a brief note about why this matters and what to do about it. Keep it to 2 sentences.`,
+      question: `You are a meeting coach. The user is considering asking: "${s.text}". Write what they should say — 1-2 natural sentences they can speak aloud. Don't label it.`,
+      action: `Execute this: "${s.text}". Based on the transcript context, provide the result concisely.`,
+      insight: `You spotted this: "${s.text}". Write a brief note about why it matters and what to do. 2 sentences.`,
     };
+    setChatMessages(prev => [...prev, { id: crypto.randomUUID(), role: "user", text: s.text, timestamp: Date.now() }]);
     try {
-      const resp = await callAI([{ role: "system", content: `You are a meeting assistant.${agentContext ? ` ${agentContext}` : ""}` }, { role: "user", content: `Transcript:\n${ctx}\n\n${prompts[s.type]}` }], orKey, aiModel);
+      const resp = await callAI([{ role: "system", content: `You are a meeting assistant.${agentContext ? ` ${agentContext}` : ""}` }, { role: "user", content: `Transcript:\n${getCtx()}\n\n${prompts[s.type]}` }], orKey, aiModel);
       setChatMessages(prev => [...prev, { id: crypto.randomUUID(), role: "agent", text: resp, timestamp: Date.now() }]);
     } catch { setChatMessages(prev => [...prev, { id: crypto.randomUUID(), role: "agent", text: "AI unavailable.", timestamp: Date.now() }]); }
     setAiLoading(false);
   };
 
-  const handleChat = async () => { if (!chatInput.trim()) return; const m: ChatMessage = { id: crypto.randomUUID(), role: "user", text: chatInput, timestamp: Date.now() }; setChatMessages(prev => [...prev, m]); setChatInput(""); if (!orKey) return; setAiLoading(true); try { const resp = await callAI([{ role: "system", content: `You are a meeting assistant. Answer concisely.${agentContext ? ` ${agentContext}` : ""}` }, { role: "user", content: `Transcript:\n${getCtx()}\n\nUser: ${m.text}` }], orKey, aiModel); setChatMessages(prev => [...prev, { id: crypto.randomUUID(), role: "agent", text: resp, timestamp: Date.now() }]); } catch {} setAiLoading(false); };
+  const handleChat = async () => {
+    if (!chatInput.trim()) return;
+    const m: ChatMessage = { id: crypto.randomUUID(), role: "user", text: chatInput, timestamp: Date.now() };
+    setChatMessages(prev => [...prev, m]); setChatInput("");
+    if (!orKey) return; setAiLoading(true);
+    try { const resp = await callAI([{ role: "system", content: `You are a meeting assistant. Answer concisely.${agentContext ? ` ${agentContext}` : ""}` }, { role: "user", content: `Transcript:\n${getCtx()}\n\nUser: ${m.text}` }], orKey, aiModel); setChatMessages(prev => [...prev, { id: crypto.randomUUID(), role: "agent", text: resp, timestamp: Date.now() }]); } catch {}
+    setAiLoading(false);
+  };
 
-  const handleAction = async (a: typeof QUICK_ACTIONS[0]) => { setChatMessages(prev => [...prev, { id: crypto.randomUUID(), role: "user", text: a.label, timestamp: Date.now() }]); setShowPalette(false); if (!orKey) return; setAiLoading(true); try { const resp = await callAI([{ role: "system", content: `Execute: "${a.prompt}". Based on transcript, provide the result.${agentContext ? ` Context: ${agentContext}` : ""}` }, { role: "user", content: getCtx() }], orKey, aiModel); setChatMessages(prev => [...prev, { id: crypto.randomUUID(), role: "agent", text: resp, timestamp: Date.now() }]); } catch {} setAiLoading(false); };
-
-  const copyTx = () => { navigator.clipboard.writeText(grouped.map(l => `[${l.speaker}]: ${l.text}`).join("\n")); setCopiedId("tx"); setTimeout(() => setCopiedId(null), 2000); };
-
-  // Export the whole session (transcript + suggestions + chat) to a Markdown file.
+  const copyTx = () => { navigator.clipboard.writeText(getCtx()); setCopiedTx(true); setTimeout(() => setCopiedTx(false), 2000); };
   const exportMarkdown = () => {
-    const md = [
-      `# ${selectedMeeting?.title || "Meeting"}`,
-      `\n## Transcript\n`,
-      grouped.map(l => `**${l.speaker}:** ${l.text}`).join("\n\n") || "_No transcript._",
-      `\n## Suggestions\n`,
-      suggestions.map(s => `- _${s.type}_ — ${s.text}`).join("\n") || "_None._",
-      `\n## Assistant chat\n`,
-      chatMessages.map(m => `**${m.role === "user" ? "You" : "AI"}:** ${m.text}`).join("\n\n") || "_None._",
-    ].join("\n");
+    const md = [`# ${selectedMeeting?.title || "Meeting"}`, `\n## Transcript\n`, grouped.map(l => `**${l.speaker}:** ${l.text}`).join("\n\n") || "_No transcript._", `\n## Chat\n`, chatMessages.map(m => `**${m.role === "user" ? "You" : "AI"}:** ${m.text}`).join("\n\n") || "_None._"].join("\n");
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([md], { type: "text/markdown" }));
     a.download = `fireflies-${Date.now()}.md`; a.click(); URL.revokeObjectURL(a.href);
   };
 
-  const cats = ["all", ...new Set(QUICK_ACTIONS.map(a => a.category))];
-  const filtered = activeCategory === "all" ? QUICK_ACTIONS : QUICK_ACTIONS.filter(a => a.category === activeCategory);
-  const dot = status === "connected" ? "bg-emerald-500" : status === "connecting" ? "bg-amber-500" : status === "error" ? "bg-rose-500" : "bg-text-muted/50";
+  const isConnected = status === "connected";
   const activeMeetings = meetings.filter(m => m.active);
-
-  // ── Suggestions feed: pure view logic over `suggestions` ───────
-  // Filter by type, then show newest ~5 by default with a show-more reveal.
-  const SUGG_COLLAPSED = 5;
-  const SUGG_FILTERS: { value: typeof suggFilter; label: string }[] = [
-    { value: "all", label: "All" },
-    { value: "question", label: "Ask" },
-    { value: "action", label: "Do" },
-    { value: "insight", label: "Note" },
-  ];
+  const statusLabel = status === "connected" ? "Connected" : status === "connecting" ? "Connecting…" : status === "error" ? "Error" : "Idle";
+  const statusColor = status === "connected" ? "bg-live" : status === "connecting" ? "bg-connecting" : status === "error" ? "bg-speaker-a" : "bg-idle";
   const filteredSuggestions = suggFilter === "all" ? suggestions : suggestions.filter(s => s.type === suggFilter);
-  const visibleSuggestions = suggExpanded ? filteredSuggestions : filteredSuggestions.slice(0, SUGG_COLLAPSED);
-  const suggOverflow = filteredSuggestions.length - SUGG_COLLAPSED;
+  const visibleSuggestions = suggExpanded ? filteredSuggestions : filteredSuggestions.slice(0, 4);
+  const featuresOn = Object.values(flags).filter(Boolean).length;
 
-  // ── Question-mode "Say this" live banner ───────────────────────
-  const sayThisBanner = questionMode && liveAnswer && (
-    <div className="px-10 lg:px-14 pt-8">
-      <div className="animate-live-glow rounded-2xl border border-accent/30 bg-accent-dim/60 backdrop-blur-sm overflow-hidden">
-        <div className="flex items-center gap-3 px-8 pt-6 pb-2">
-          <span className="relative flex w-2.5 h-2.5">
-            <span className="absolute inline-flex w-full h-full rounded-full bg-accent opacity-60 animate-ping" />
-            <span className="relative inline-flex rounded-full w-2.5 h-2.5 bg-accent" />
-          </span>
-          <span className="text-[11px] font-bold text-accent uppercase tracking-wider">Say this</span>
-          <ArrowRight size={13} className="text-accent" />
-          <span className="text-[11px] text-text-muted font-medium ml-auto">live suggested reply</span>
-        </div>
-        <div className="px-8 pb-7 pt-3 text-text-primary">
-          <Markdown text={liveAnswer} />
-        </div>
-      </div>
-    </div>
-  );
-
-  // ── Transcription column ───────────────────────────────────────
-  const transcriptColumn = (
-    <main className="flex flex-col min-w-0 flex-1 h-full">
-      <div className="h-24 border-b border-border flex items-center justify-between px-12 lg:px-16 shrink-0">
-        <div className="flex items-center gap-4 min-w-0 pl-1">
-          <Mic size={16} className="text-accent shrink-0" />
-          <span className="font-display text-[15px] font-bold text-text-primary tracking-tight">Live transcription</span>
-          {selectedMeeting && <span className="text-[12px] text-text-muted font-medium truncate max-w-[260px] pl-4 ml-1 border-l border-border">{selectedMeeting.title || selectedMeeting.id.slice(-8)}</span>}
-        </div>
-        <div className="flex items-center gap-3.5 shrink-0">
-          <button
-            onClick={() => setQuestionMode(!questionMode)}
-            data-active={questionMode}
-            className={`btn btn-sm ${questionMode ? "btn-primary" : "btn-secondary"}`}
-            title="Draft what to say in reply to the live conversation">
-            <Sparkles size={13} /> Question mode
-          </button>
-          <button onClick={copyTx} title="Copy transcript" className="btn btn-ghost btn-icon shrink-0">{copiedId === "tx" ? <Check size={16} className="text-success" /> : <Copy size={16} />}</button>
-          <button onClick={exportMarkdown} title="Export session as Markdown" className="btn btn-ghost btn-icon shrink-0"><Download size={16} /></button>
-        </div>
-      </div>
-      {sayThisBanner}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-10 lg:px-14 py-12 space-y-3">
-        {lines.length === 0 && (
-          <div className="flex items-center justify-center h-full">
-            <div className="text-center max-w-[480px] w-full px-4">
-              <div className="mx-auto mb-8 grid place-items-center w-16 h-16 rounded-3xl bg-accent-dim border border-accent/15">
-                <Radio size={28} className="text-accent" />
-              </div>
-              <h2 className="font-display text-[20px] font-bold text-text-primary tracking-tight">Listen in on a live meeting</h2>
-              <p className="text-[13px] text-text-muted mt-3 leading-relaxed max-w-[400px] mx-auto">
-                We auto-detect your active Fireflies meetings. Pick one and hit Connect — or paste a meeting ID to jump straight in.
-              </p>
-              <div className="mt-10 grid gap-5 text-left">
-                <div className="card-soft flex items-start gap-5 p-7">
-                  <span className="grid place-items-center w-10 h-10 shrink-0 rounded-xl bg-accent-dim text-accent"><Search size={17} /></span>
-                  <div>
-                    <p className="text-[13px] font-semibold text-text-primary">Auto-detect active meetings</p>
-                    <p className="text-[12px] text-text-muted mt-1.5 leading-relaxed">Your live sessions appear in the panel — no setup needed.</p>
-                  </div>
-                </div>
-                <div className="card-soft flex items-start gap-5 p-7">
-                  <span className="grid place-items-center w-10 h-10 shrink-0 rounded-xl bg-accent-dim text-accent"><Plug size={17} /></span>
-                  <div>
-                    <p className="text-[13px] font-semibold text-text-primary">Pick one &amp; hit Connect</p>
-                    <p className="text-[12px] text-text-muted mt-1.5 leading-relaxed">One click streams the transcript here in real time.</p>
-                  </div>
-                </div>
-                <div className="card-soft flex items-start gap-5 p-7">
-                  <span className="grid place-items-center w-10 h-10 shrink-0 rounded-xl bg-accent-dim text-accent"><Command size={17} /></span>
-                  <div>
-                    <p className="text-[13px] font-semibold text-text-primary">Or paste a meeting ID</p>
-                    <p className="text-[12px] text-text-muted mt-1.5 leading-relaxed">
-                      Grab it from the URL <code className="font-mono text-[11px] bg-surface-2 text-text-secondary px-1.5 py-0.5 rounded border border-border">app.fireflies.ai/view/<span className="text-accent font-semibold">ID</span></code>, then Set &amp; Connect.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-        {grouped.map(l => (
-          <div key={l.id} className="animate-fade-in group flex items-baseline gap-7 py-4 px-5 -mx-5 rounded-xl hover:bg-surface-2/60 transition-colors">
-            <span className={`text-[12px] font-semibold shrink-0 w-[136px] text-right tracking-tight ${speakerColor(l.speaker)}`}>{l.speaker}</span>
-            <span className="text-[15px] text-text-primary leading-relaxed">{l.text}{!l.isFinal && <span className="inline-block w-[2px] h-4 bg-accent ml-1 animate-cursor align-middle rounded-full" />}</span>
-          </div>
-        ))}
-      </div>
-    </main>
-  );
-
-  // ── Config / context panel ─────────────────────────────────────
-  const configPanel = (
-    <div className="border-b border-border">
-      <button onClick={() => setShowConfig(v => !v)}
-        className="w-full min-h-16 flex items-center justify-between px-9 py-5 text-[13px] font-semibold text-text-primary tracking-tight hover:bg-surface-2/60 transition-colors">
-        <div className="flex items-center gap-2.5"><Settings2 size={15} className="text-accent" /> Agent configuration</div>
-        {showConfig ? <ChevronUp size={16} className="text-text-muted" /> : <ChevronDown size={16} className="text-text-muted" />}
-      </button>
-      {showConfig && (
-      <div className="px-9 pb-9 space-y-9">
-      {/* Agent context modes */}
-      <div className="space-y-4">
-        <div className="flex items-center justify-between gap-3">
-          <label className="block text-[11px] font-semibold text-text-secondary uppercase tracking-wider">Agent mode</label>
-          <button onClick={handleProposeModes} disabled={proposingModes || grouped.length === 0}
-            className="chip chip-dashed" title="Let the AI read the meeting and propose tailored modes">
-            {proposingModes
-              ? <><RefreshCw size={12} className="animate-spin" /> Reading…</>
-              : <><Wand2 size={12} /> Suggest from meeting</>}
-          </button>
-        </div>
-        <div className="flex flex-wrap gap-x-4 gap-y-3.5 pr-1">
-          {AGENT_MODES.map(m => (
-            <button key={m.label} onClick={() => setAgentContext(m.context)} data-active={agentContext === m.context} className="chip px-4 py-2.5">
-              {m.label}
-            </button>
-          ))}
-          {proposedModes.map(m => (
-            <button key={`p-${m.label}`} onClick={() => setAgentContext(m.context)} data-active={agentContext === m.context}
-              className="chip px-4 py-2.5" title={m.context}>
-              <Sparkles size={11} /> {m.label}
-            </button>
-          ))}
-        </div>
-        <textarea value={agentContext} onChange={e => setAgentContext(e.target.value)} rows={3}
-          placeholder="Or write your own: 'You're advising the host; goal is to close the deal. Flag risks and next steps.'"
-          className="field px-5 py-4 leading-relaxed resize-none" />
-      </div>
-
-      {/* AI model */}
-      <div className="space-y-2.5">
-        <label htmlFor="ai-model" className="flex items-center gap-1.5 text-[11px] font-semibold text-text-secondary uppercase tracking-wider"><Cpu size={12} /> AI model (OpenRouter)</label>
-        <select id="ai-model" value={aiModel} onChange={e => setAiModel(e.target.value)}
-          className="field px-5 py-3 cursor-pointer h-12">
-          {[...new Set(AI_MODELS.map(m => m.group))].map(g => (
-            <optgroup key={g} label={g}>
-              {AI_MODELS.filter(m => m.group === g).map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
-            </optgroup>
-          ))}
-        </select>
-      </div>
-
-      {/* Feature flags */}
-      <div className="space-y-3">
-        <span className="block text-[11px] font-semibold text-text-secondary uppercase tracking-wider">Features</span>
-        <div className="flex flex-wrap gap-x-4 gap-y-3.5 pr-1">
-          {(Object.keys(flags) as (keyof FeatureFlags)[]).map(k => (
-            <button key={k} onClick={() => setFlags(p => ({ ...p, [k]: !p[k] }))}
-              className={`shrink-0 px-5 py-3 rounded-full text-[11px] font-semibold transition-all cursor-pointer ${flags[k] ? "bg-accent text-white shadow-[0_2px_8px_-2px_var(--color-accent-glow)]" : "bg-surface-2 text-text-muted hover:text-text-secondary"}`}>
-              {k.replace(/([A-Z])/g, " $1").replace(/^./, s => s.toUpperCase())}
-            </button>
-          ))}
-        </div>
-      </div>
-      </div>
-      )}
-    </div>
-  );
-
-  // ── Backend Terminal · PI (localhost command bridge UI) ────────
-  const terminalPane = (
-    <div className="border-b border-border">
-      <button onClick={() => setShowTerminal(v => !v)}
-        className="w-full min-h-16 flex items-center justify-between px-8 py-5 text-[13px] font-semibold text-text-primary tracking-tight hover:bg-surface-2/60 transition-colors">
-        <div className="flex items-center gap-2.5">
-          <Terminal size={15} className="text-accent" /> Backend Terminal · PI
-          <span className={`bridge-dot ${bridgeOnline ? "online" : "offline"}`} title={bridgeOnline ? "Bridge online" : "Bridge offline"} />
-        </div>
-        <span className="grid place-items-center w-7 h-7 rounded-lg text-text-muted">{showTerminal ? <ChevronUp size={15} /> : <ChevronDown size={15} />}</span>
-      </button>
-
-      {showTerminal && (
-        <div className="px-8 pb-8 space-y-5">
-          {/* Output console */}
-          <div ref={termScrollRef} className="term-screen px-7 py-6 h-[240px] overflow-y-auto space-y-1.5">
-            {termLines.length === 0 ? (
-              <div className="term-empty term-line leading-relaxed">
-                Delegate shell tasks to your machine.{"\n"}Bridge runs on 127.0.0.1.
-              </div>
-            ) : (
-              termLines.map((l, i) => (
-                <div key={i} className={`term-line ${l.stream === "err" ? "term-err" : l.stream === "sys" ? "term-sys" : "term-out"}`}>{l.text}</div>
-              ))
-            )}
-            {termRunning && (
-              <div className="term-sys term-line inline-flex items-center gap-2 pt-1">
-                <RefreshCw size={12} className="animate-spin" /> running…
-              </div>
-            )}
-          </div>
-
-          {/* Confirmation guardrail — prominent, not a tiny link */}
-          {pendingCmd && (
-            <div className="confirm-bar animate-fade-in px-6 py-5 space-y-4">
-              <div className="flex items-center gap-2.5">
-                <AlertTriangle size={15} className="text-amber-600 shrink-0" />
-                <span className="text-[11px] font-bold text-amber-700 uppercase tracking-wider">Confirm command</span>
-              </div>
-              <pre className="font-mono text-[12.5px] text-text-primary bg-surface-1 border border-border rounded-xl px-4 py-3.5 overflow-x-auto whitespace-pre-wrap break-words">{pendingCmd}</pre>
-              <div className="flex items-center gap-3">
-                <button onClick={confirmRun} className="btn btn-primary btn-sm">
-                  <Play size={12} /> Run
-                </button>
-                <button onClick={cancelPending} className="btn btn-secondary btn-sm">
-                  <X size={12} /> Cancel
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Input row */}
-          <div className="space-y-4">
-            <div className="field flex items-center gap-2.5 pl-5 pr-3 py-3">
-              <Terminal size={15} className="text-text-muted shrink-0" />
-              <input
-                value={termInput}
-                onChange={e => setTermInput(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && requestRun()}
-                disabled={termRunning || !bridgeOnline}
-                placeholder={usePI ? "Describe a task to delegate…" : "Type a shell command…"}
-                className="flex-1 bg-transparent text-[13px] text-text-primary placeholder-text-muted outline-none font-mono disabled:opacity-50 min-w-0" />
-              <button onClick={requestRun} disabled={termRunning || !bridgeOnline} className="btn btn-primary btn-icon-sm shrink-0" title="Send command">
-                <Send size={15} />
-              </button>
-            </div>
-
-            <div className="flex items-center gap-3.5 flex-wrap pt-0.5">
-              <button onClick={() => setUsePI(v => !v)} data-active={usePI} className="toggle-pill" title="Route the command through PI instead of running it raw">
-                <span className="toggle-track"><span className="toggle-knob" /></span>
-                Route through PI
-              </button>
-              {usePI && (
-                <div className="field flex items-center gap-2 pl-3.5 pr-2.5 py-2 !w-auto">
-                  <Cpu size={13} className="text-text-muted shrink-0" />
-                  <input
-                    value={piCmd}
-                    onChange={e => setPiCmd(e.target.value)}
-                    placeholder="pi"
-                    className="w-20 bg-transparent text-[12.5px] text-text-primary placeholder-text-muted outline-none font-mono" />
-                </div>
-              )}
-            </div>
-
-            {!bridgeOnline && (
-              <p className="text-[11px] text-text-muted font-medium leading-relaxed flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-text-muted/50 shrink-0" />
-                Bridge offline — start the dev server.
-              </p>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-
-  // ── Sidebar (suggestions / palette / chat / config) ────────────
-  const sidebar = (
-    <div className="flex flex-col min-h-0 h-full">
-      <div className="flex-1 flex flex-col min-h-0 overflow-y-auto">
-        {configPanel}
-
-        {/* Suggestions — live news-feed, newest first, filterable + collapsible */}
-        {flags.aiSuggestions && (
-          <div className="border-b border-border">
-            <div className="min-h-16 flex items-center justify-between px-9 py-5 gap-6">
-              <div className="flex items-center text-[13px] font-semibold text-text-primary tracking-tight"><Lightbulb size={15} className="mr-2.5 text-amber-500" /> Live feed</div>
-              <label className="flex items-center gap-2 cursor-pointer" title="How often the AI refreshes suggestions">
-                <Gauge size={13} className="text-text-muted" />
-                <select value={pulseMs} onChange={e => setPulseMs(Number(e.target.value))}
-                  className="field !w-auto text-[11px] font-semibold pl-3.5 pr-3 py-2 cursor-pointer">
-                  {PULSE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                </select>
-              </label>
-            </div>
-
-            {/* Filter chip row */}
-            <div className="flex items-center gap-3.5 px-9 pt-1 pb-4">
-              {SUGG_FILTERS.map(f => {
-                const count = f.value === "all" ? suggestions.length : suggestions.filter(s => s.type === f.value).length;
-                return (
-                  <button key={f.value} onClick={() => setSuggFilter(f.value)} data-active={suggFilter === f.value} className="chip-filter px-3.5 py-2">
-                    {f.label}
-                    {count > 0 && <span className="tabular-nums opacity-70">{count}</span>}
-                  </button>
-                );
-              })}
-            </div>
-
-            {!orKey && (
-              <div className="px-9 pb-1 pt-1">
-                <span className="offline-note">
-                  <span className="offline-note-dot" />
-                  AI offline — set OPENROUTER_API
-                </span>
-              </div>
-            )}
-
-            <div className="px-8 pt-3 pb-8 space-y-3.5">
-              {filteredSuggestions.length === 0 && (
-                <p className="text-[12.5px] text-text-muted px-3 py-2.5 font-medium leading-relaxed">
-                  {suggestions.length === 0
-                    ? "Suggestions stream in here as the conversation evolves — newest on top. Tap one to ask the AI."
-                    : "Nothing in this filter yet. Try another, or switch back to All."}
-                </p>
-              )}
-              {visibleSuggestions.map((s, i) => {
-                const st = SUGGESTION_STYLE[s.type];
-                return (
-                  <button key={s.id || i} onClick={() => handleSuggestion(s)} disabled={aiLoading}
-                    className={`group w-full ${i === 0 ? "animate-feed-in" : ""} flex items-start gap-4 px-6 py-5 rounded-2xl border text-left transition-all disabled:opacity-40 hover:-translate-y-px active:translate-y-0 active:scale-[0.99] cursor-pointer ${st.bg} ${st.border}`}>
-                    <div className="relative shrink-0 mt-0.5">
-                      <st.icon size={16} className={st.icon_color} />
-                      <span className={`absolute -top-1 -right-1 w-2 h-2 rounded-full ring-2 ring-surface-1 ${st.dot}`} />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2.5">
-                        <span className="text-[9.5px] font-bold text-text-muted uppercase tracking-wider">{st.label}</span>
-                        <span className="text-[9.5px] font-semibold text-text-muted/80 ml-auto tabular-nums">{relTime(s.ts)}</span>
-                      </div>
-                      <p className="text-[13px] text-text-secondary font-medium leading-snug mt-1.5">{s.text}</p>
-                    </div>
-                  </button>
-                );
-              })}
-
-              {suggOverflow > 0 && (
-                <button onClick={() => setSuggExpanded(v => !v)} className="feed-toggle mt-1">
-                  {suggExpanded
-                    ? <>Show less <ChevronUp size={13} /></>
-                    : <>Show more ({suggOverflow}) <ChevronDown size={13} /></>}
-                </button>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Code Palette */}
-        {flags.codePalette && (
-          <div className="border-b border-border">
-            <button onClick={() => setShowPalette(!showPalette)}
-              className="w-full min-h-16 flex items-center justify-between px-8 py-5 text-[13px] font-semibold text-text-primary tracking-tight hover:bg-surface-2/60 transition-colors">
-              <div className="flex items-center gap-2.5"><Command size={15} className="text-accent" /> Code Palette</div>
-              <span className="grid place-items-center w-7 h-7 rounded-lg text-text-muted">{showPalette ? <ChevronUp size={15} /> : <ChevronDown size={15} />}</span>
-            </button>
-            {showPalette && (
-              <div className="px-8 pb-8">
-                <div className="flex gap-3.5 mb-5 flex-wrap">
-                  {cats.map(c => <button key={c} onClick={() => setActiveCategory(c)} className={`shrink-0 px-4 py-2.5 rounded-full text-[11px] font-semibold capitalize transition-colors ${activeCategory === c ? "bg-accent text-white" : "bg-surface-2 text-text-muted hover:text-text-secondary"}`}>{c}</button>)}
-                </div>
-                <div className="space-y-2">
-                  {filtered.map(a => (
-                    <button key={a.id} onClick={() => handleAction(a)} disabled={aiLoading}
-                      className="w-full flex items-center gap-4 px-5 py-3.5 rounded-xl text-left hover:bg-surface-2 transition-colors group disabled:opacity-40">
-                      <span className="grid place-items-center w-9 h-9 shrink-0 rounded-xl bg-surface-2 text-base group-hover:bg-accent-dim transition-colors">{a.icon}</span><span className="text-[13px] text-text-secondary font-medium group-hover:text-text-primary transition-colors">{a.label}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Backend Terminal · PI */}
-        {terminalPane}
-
-        {/* AI Chat */}
-        <div className="flex flex-col">
-          <div className="h-16 flex items-center px-8 text-[13px] font-semibold text-text-primary tracking-tight shrink-0">
-            <MessageSquare size={15} className="mr-2.5 text-accent" /> {orKey ? "AI Assistant" : "System Chat"}
-            {aiLoading && <span className="ml-2.5 inline-flex items-center gap-1.5 text-accent text-[11px] font-medium"><span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />thinking</span>}
-          </div>
-          <div ref={chatScrollRef} className="px-8 space-y-6 pb-4">
-            {chatMessages.length === 0 && <p className="text-[12.5px] text-text-muted py-2.5 px-1 font-medium leading-relaxed">{orKey ? "Tap a suggestion or quick action, or just ask anything about the meeting." : "Chat with the system."}</p>}
-            {chatMessages.map(m => m.role === "user"
-              ? (
-                <div key={m.id} className="animate-fade-in flex justify-end">
-                  <div className="bubble-user md-invert max-w-[88%] px-6 py-3.5"><Markdown text={m.text} /></div>
-                </div>
-              )
-              : (
-                <div key={m.id} className="animate-fade-in flex items-start gap-3">
-                  <span className="chat-avatar !w-8 !h-8"><Sparkles size={15} /></span>
-                  <div className="bubble-agent max-w-[86%] px-6 py-4"><Markdown text={m.text} /></div>
-                </div>
-              ))}
-            {aiLoading && (
-              <div className="flex items-start gap-3 animate-fade-in">
-                <span className="chat-avatar !w-8 !h-8"><Sparkles size={15} /></span>
-                <div className="bubble-agent px-6 py-5 inline-flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#2f6bdb] animate-pulse" />
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#2f6bdb] animate-pulse [animation-delay:150ms]" />
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#2f6bdb] animate-pulse [animation-delay:300ms]" />
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Chat composer — pinned */}
-      <div className="px-8 py-6 border-t border-border shrink-0 space-y-3.5">
-        {!orKey && (
-          <span className="offline-note">
-            <span className="offline-note-dot" />
-            AI offline — set OPENROUTER_API
-          </span>
-        )}
-        <div className="field flex gap-2.5 items-center pl-5 pr-3.5 py-3">
-          <input value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => e.key === "Enter" && handleChat()}
-            placeholder={orKey ? "Ask the AI anything..." : "Type a message..."}
-            className="flex-1 bg-transparent text-[13px] text-text-primary placeholder-text-muted outline-none font-medium" />
-          <button onClick={handleChat} disabled={aiLoading} className="btn btn-primary btn-icon-sm shrink-0"><Send size={15} /></button>
-        </div>
-      </div>
-    </div>
-  );
-
-  // ── Dedicated AI chat view (viewMode === "chat") ───────────────
-  // Centered reading column matching the chat design: header, seeded
-  // greeting, agent/user bubbles, rounded composer with a round send.
-  const agentBubble = (text: string, key: string, animate = true) => (
-    <div key={key} className={`${animate ? "animate-fade-in " : ""}flex items-start gap-3.5`}>
-      <span className="chat-avatar"><Sparkles size={17} /></span>
-      <div className="bubble-agent px-6 py-4 max-w-[80%]"><Markdown text={text} /></div>
-    </div>
-  );
-  const chatThread = (
+  // ── Chat thread + composer (shared by sidebar tab and chat view) ──
+  const chatThread = (compact = false) => (
     <>
-      {agentBubble("Hi — I'm following this call live. Ask me anything, or tap a suggestion to dig in.", "greeting", false)}
-      {chatMessages.map(m => m.role === "user"
-        ? (
-          <div key={m.id} className="animate-fade-in flex justify-end">
-            <div className="bubble-user md-invert px-6 py-3.5 max-w-[80%]"><Markdown text={m.text} /></div>
-          </div>
-        )
-        : agentBubble(m.text, m.id))}
-      {aiLoading && (
-        <div className="animate-fade-in flex items-start gap-3.5">
+      <div className="flex items-start gap-3.5">
+        <span className="chat-avatar"><Sparkles size={17} /></span>
+        <div className={`bubble-agent px-5 py-4 ${compact ? "max-w-[86%]" : "max-w-[80%]"}`}>
+          <p className="text-[14.5px] text-ink leading-relaxed">Hi — I'm following this call live. Ask me anything, or tap a suggestion to dig in.</p>
+        </div>
+      </div>
+      {chatMessages.map(m => m.role === "user" ? (
+        <div key={m.id} className="flex justify-end">
+          <div className="bubble-user md-invert px-5 py-3.5 max-w-[80%]"><Markdown text={m.text} /></div>
+        </div>
+      ) : (
+        <div key={m.id} className="flex items-start gap-3.5">
           <span className="chat-avatar"><Sparkles size={17} /></span>
-          <div className="bubble-agent px-6 py-5 inline-flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#2f6bdb] animate-pulse" />
-            <span className="w-1.5 h-1.5 rounded-full bg-[#2f6bdb] animate-pulse [animation-delay:150ms]" />
-            <span className="w-1.5 h-1.5 rounded-full bg-[#2f6bdb] animate-pulse [animation-delay:300ms]" />
+          <div className={`bubble-agent px-5 py-4 ${compact ? "max-w-[86%]" : "max-w-[80%]"}`}><Markdown text={m.text} /></div>
+        </div>
+      ))}
+      {aiLoading && (
+        <div className="flex items-start gap-3.5">
+          <span className="chat-avatar"><Sparkles size={17} /></span>
+          <div className="bubble-agent px-5 py-5 inline-flex items-center gap-1.5">
+            <span className="dot-bounce" /><span className="dot-bounce [animation-delay:150ms]" /><span className="dot-bounce [animation-delay:300ms]" />
           </div>
         </div>
       )}
     </>
   );
-  const chatComposer = (
-    <div className="chat-composer flex items-center gap-3 pl-6 pr-2.5 py-2.5">
-      <input value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => e.key === "Enter" && handleChat()}
-        placeholder={orKey ? "Ask the AI anything…" : "Type a message…"}
-        className="flex-1 bg-transparent text-[14px] text-text-primary placeholder-text-muted outline-none font-medium min-w-0" />
+
+  const composer = (
+    <div className="chat-composer field flex items-end gap-2.5 pl-[18px] pr-2 py-2">
+      <textarea value={chatInput} onChange={e => setChatInput(e.target.value)}
+        onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleChat(); } }}
+        rows={1} placeholder={orKey ? "Ask the AI anything…" : "Type a message…"}
+        className="flex-1 bg-transparent text-[14.5px] text-ink placeholder-muted outline-none font-medium resize-none py-2 min-w-0 max-h-28" />
       <button onClick={handleChat} disabled={aiLoading || !chatInput.trim()} className="chat-send" title="Send"><Send size={17} /></button>
     </div>
   );
-  const chatView = (
-    <div className="flex-1 flex justify-center min-h-0">
-      <div className="flex flex-col w-full max-w-3xl min-h-0 px-6">
-        {/* Header */}
-        <div className="flex items-center gap-4 px-2 pt-12 pb-9 shrink-0">
-          <span className="chat-avatar !w-11 !h-11 !rounded-2xl"><Sparkles size={20} /></span>
-          <div>
-            <h2 className="font-display text-[18px] font-bold text-text-primary tracking-tight leading-none">AI assistant</h2>
-            <p className="text-[13px] text-text-muted font-medium mt-2">Ask anything about this meeting</p>
-          </div>
-        </div>
-        {/* Thread */}
-        <div ref={chatScrollRef} className="flex-1 overflow-y-auto px-2 pb-8 space-y-7">
-          {chatThread}
-        </div>
-        {/* Composer */}
-        <div className="px-2 pt-3 pb-12 shrink-0">
-          {!orKey && <span className="offline-note mb-3"><span className="offline-note-dot" />AI offline — set OPENROUTER_API</span>}
-          {chatComposer}
-        </div>
-      </div>
-    </div>
-  );
 
-  const statusLabel = status === "connected" ? "Connected" : status === "connecting" ? "Connecting…" : status === "error" ? "Error" : "Idle";
-
-  // ── Active Meetings popover (top-right control) ────────────────
+  // ── Active meetings popover ───────────────────────────────────────
   const activeMeetingsControl = (
     <div className="relative">
-      <button onClick={() => setMeetingsOpen(o => !o)}
-        className={`btn btn-secondary btn-lg ${meetingsOpen ? "border-border-hover text-text-primary" : ""}`}>
-        <Radio size={15} className="text-accent" /> Active meetings
-        {activeMeetings.length > 0 && <span className="ml-0.5 px-2 py-0.5 rounded-full bg-accent text-white text-[10px] font-bold leading-none">{activeMeetings.length}</span>}
+      <button onClick={() => setMeetingsOpen(o => !o)} className={`btn btn-soft ${meetingsOpen ? "border-accent-border text-ink" : ""}`}>
+        <Radio size={16} className="text-accent" /> Active meetings
+        {activeMeetings.length > 0 && <span className="px-1.5 py-0.5 rounded-full bg-accent text-white text-[10px] font-bold leading-none">{activeMeetings.length}</span>}
         <ChevronDown size={14} className={`transition-transform ${meetingsOpen ? "rotate-180" : ""}`} />
       </button>
-
       {meetingsOpen && (
         <>
           <div className="fixed inset-0 z-30" onClick={() => setMeetingsOpen(false)} aria-hidden />
-          <div className="popover animate-pop-in absolute right-0 top-[calc(100%+12px)] z-40 w-[420px] max-w-[calc(100vw-3rem)] p-8">
-            {/* header row */}
-            <div className="flex items-center justify-between mb-6">
-              <span className="text-[12px] font-semibold text-text-secondary uppercase tracking-wider">Active meetings</span>
-              <div className="flex items-center gap-1">
-                <button onClick={loadMeetings} disabled={!ffKey || loadingMeetings} className="btn btn-ghost btn-icon-sm" title="Refresh meetings">
-                  <RefreshCw size={15} className={loadingMeetings ? "animate-spin" : ""} />
-                </button>
-                <button onClick={() => setMeetingsOpen(false)} className="btn btn-ghost btn-icon-sm" title="Close"><X size={15} /></button>
-              </div>
+          <div className="popover anim-pop absolute right-0 top-[calc(100%+12px)] z-40 w-[380px] max-w-[calc(100vw-3rem)] p-[22px]">
+            <div className="flex items-center justify-between mb-5">
+              <span className="font-display text-[15px] font-bold text-ink">Active meetings</span>
+              <button onClick={loadMeetings} disabled={!ffKey || loadingMeetings} className="icon-btn !w-8 !h-8"><RefreshCw size={15} className={loadingMeetings ? "animate-spin" : ""} /></button>
             </div>
-
-            {/* list */}
             {loadingMeetings ? (
-              <div className="flex items-center gap-3 text-[13px] text-text-muted font-medium px-1 py-6 justify-center">
-                <RefreshCw size={15} className="animate-spin text-accent" /> Scanning…
-              </div>
+              <div className="flex items-center gap-3 text-[13px] text-muted font-medium py-6 justify-center"><RefreshCw size={15} className="animate-spin text-accent" /> Scanning…</div>
             ) : activeMeetings.length > 0 ? (
-              <div className="space-y-3.5 max-h-[320px] overflow-y-auto -mx-1 px-1">
-                {activeMeetings.map(m => {
-                  const isSel = selectedMeeting?.id === m.id;
-                  return (
-                    <div key={m.id} className={`card-soft flex items-center gap-4 p-5 ${isSel ? "ring-2 ring-accent/40" : ""}`}>
-                      <span className="grid place-items-center w-10 h-10 shrink-0 rounded-xl bg-accent-dim text-accent">
-                        <span className="relative flex w-2.5 h-2.5"><span className="absolute inline-flex w-full h-full rounded-full bg-accent opacity-60 animate-ping" /><span className="relative inline-flex rounded-full w-2.5 h-2.5 bg-accent" /></span>
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-[13px] font-semibold text-text-primary truncate">{m.title || m.id.slice(-8)}</p>
-                        <p className="text-[11px] text-text-muted font-medium mt-0.5">Live now</p>
-                      </div>
-                      <button onClick={() => { startConnection(m); setMeetingsOpen(false); }} disabled={status === "connecting" || status === "connected"} className="btn btn-primary btn-sm shrink-0">
-                        <Play size={12} /> Connect
-                      </button>
+              <div className="space-y-3 max-h-[320px] overflow-y-auto">
+                {activeMeetings.map(m => (
+                  <div key={m.id} className="flex items-center gap-3.5 p-3.5 rounded-control border border-border-soft hover:border-accent-border hover:bg-accent-tint/40 transition-colors">
+                    <span className="status-dot"><span className="live-ring" /><span className="relative w-2.5 h-2.5 rounded-full bg-live" /></span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[14px] font-bold text-ink truncate">{m.title || m.id.slice(-8)}</p>
+                      <p className="text-[12.5px] text-muted font-medium mt-0.5">Live now</p>
                     </div>
-                  );
-                })}
+                    <button onClick={() => { startConnection(m); setMeetingsOpen(false); }} disabled={isConnected || status === "connecting"} className="btn btn-accent btn-sm"><Play size={12} /> Connect</button>
+                  </div>
+                ))}
               </div>
             ) : (
-              <p className="text-[13px] text-text-muted font-medium px-1 py-5 text-center">
-                {ffKey ? "No active meetings right now. Refresh, or paste a meeting ID below." : "Add your Fireflies key to auto-detect live meetings."}
-              </p>
+              <p className="text-[13px] text-muted font-medium py-5 text-center">{ffKey ? "No active meetings right now." : "Add your Fireflies key to detect meetings."}</p>
             )}
-
-            {/* manual ID */}
-            <div className="mt-6 pt-6 border-t border-border space-y-3">
-              <span className="block text-[11px] font-semibold text-text-secondary uppercase tracking-wider">Paste a meeting ID</span>
-              <div className="field flex items-center gap-2.5 pl-5 pr-3 py-3">
-                <input placeholder="Meeting ID…" value={manualId} onChange={e => setManualId(e.target.value)} onKeyDown={e => e.key === "Enter" && useManualId()}
-                  className="flex-1 bg-transparent text-[13px] text-text-primary placeholder-text-muted outline-none font-medium min-w-0" />
-                <button onClick={useManualId} disabled={!manualId.trim()} className="btn btn-secondary btn-sm shrink-0">Set</button>
+            <div className="mt-5 pt-5 border-t border-border-soft space-y-3">
+              <span className="block text-[12.5px] font-bold text-ink-2">Paste a meeting ID</span>
+              <div className="field flex items-center gap-2.5 pl-4 pr-2 py-2">
+                <input placeholder="app.fireflies.ai/view/…" value={manualId} onChange={e => setManualId(e.target.value)} onKeyDown={e => e.key === "Enter" && useManualId()}
+                  className="flex-1 bg-transparent text-[13px] font-mono text-ink placeholder-muted outline-none min-w-0" />
+                <button onClick={useManualId} disabled={!manualId.trim()} className="btn btn-soft btn-sm">Set</button>
               </div>
-              {selectedMeeting && (
-                <button onClick={() => { handleConnect(); setMeetingsOpen(false); }} disabled={status === "connecting" || status === "connected"} className="btn btn-primary btn-sm w-full mt-1.5">
-                  <Play size={12} /> Connect to “{selectedMeeting.title || selectedMeeting.id.slice(-8)}”
-                </button>
-              )}
+              {selectedMeeting && <button onClick={() => { handleConnect(); setMeetingsOpen(false); }} disabled={isConnected || status === "connecting"} className="btn btn-accent btn-sm w-full"><Play size={12} /> Connect</button>}
             </div>
-            {meetingStatus && <p className="text-[11px] text-text-muted font-medium mt-4 px-1 leading-relaxed">{meetingStatus}</p>}
+            {meetingStatus && <p className="text-[11.5px] text-muted font-medium mt-3">{meetingStatus}</p>}
           </div>
         </>
       )}
     </div>
   );
 
-  return (
-    <div className="h-screen flex flex-col text-text-primary">
-      {/* === OUTER FRAME: centered, generous horizontal padding === */}
-      <div className="flex-1 flex flex-col min-h-0 w-full max-w-[1700px] mx-auto px-8 lg:px-14 xl:px-20">
-        {/* === TOP BAR === */}
-        <header className="h-24 flex items-center justify-between shrink-0 gap-8">
-          {/* Left: brand + status pill (with inline Stop when connected) */}
-          <div className="flex items-center gap-6 shrink-0 min-w-0">
-            <span className="font-display text-[18px] font-bold tracking-tight whitespace-nowrap">Fireflies <span className="text-accent">Live</span></span>
-            <div className="flex items-center gap-3 pl-5 pr-3.5 h-9 rounded-full bg-surface-1 border border-border shrink-0">
-              <span className="relative flex items-center justify-center w-2.5 h-2.5">
-                <span className={`w-2.5 h-2.5 rounded-full ${dot} ${status === "connected" ? "animate-pulse-glow" : ""}`} />
-              </span>
-              <span className="text-[12px] font-semibold text-text-secondary tracking-tight">{statusLabel}</span>
-              {status === "connected" && (
-                <button onClick={() => connRef.current?.disconnect()} className="btn btn-ghost btn-sm ml-0.5 !h-7 !px-2.5 text-rose-600 hover:!text-rose-600 hover:!bg-rose-500/10" title="Stop streaming">
-                  <Square size={11} /> Stop
-                </button>
+  // ── Header card ───────────────────────────────────────────────────
+  const header = (
+    <header className="card flex items-center gap-6 px-[26px] py-[18px] shrink-0">
+      <div className="flex items-center gap-5 shrink-0">
+        <span className="font-display text-[21px] font-bold tracking-[-0.02em] whitespace-nowrap pl-1">Fireflies <span className="text-accent">Live</span></span>
+        <div className="status-pill">
+          <span className="status-dot">{isConnected && <span className="live-ring" />}<span className={`relative w-2.5 h-2.5 rounded-full ${statusColor}`} /></span>
+          <span className="text-[13px] font-semibold text-ink-2">{statusLabel}</span>
+        </div>
+        {isConnected && <button onClick={stop} className="btn btn-sm bg-card border border-[oklch(0.9_0.02_25)] text-speaker-a hover:bg-speaker-a/5"><Square size={12} className="fill-current" /> Stop</button>}
+      </div>
+      <div className="flex items-center gap-3.5 shrink-0 ml-auto">
+        <div className="seg" role="tablist">
+          <button data-active={viewMode === "transcript"} onClick={() => setViewMode("transcript")} className="seg-item"><FileText size={14} /> Transcript</button>
+          <button data-active={viewMode === "split"} onClick={() => setViewMode("split")} className="seg-item"><Columns2 size={14} /> Split</button>
+          <button data-active={viewMode === "chat"} onClick={() => setViewMode("chat")} className="seg-item"><Sparkles size={14} /> Chat</button>
+        </div>
+        <button onClick={() => setConfigOpen(true)} className="icon-btn" title="Agent configuration"><Settings size={17} /></button>
+        {activeMeetingsControl}
+      </div>
+    </header>
+  );
+
+  // ── Transcript card ───────────────────────────────────────────────
+  const transcriptCard = (
+    <div className="card flex flex-col min-w-0 min-h-0 overflow-hidden">
+      <div className="flex items-center justify-between px-7 py-6 border-b border-border-soft shrink-0">
+        <div className="flex items-center gap-3.5 min-w-0">
+          <span className="grid place-items-center w-10 h-10 rounded-control bg-accent-tint text-accent shrink-0"><Mic size={18} /></span>
+          <div className="min-w-0">
+            <div className="font-display text-[17px] font-bold text-ink tracking-[-0.01em]">Live transcription</div>
+            {isConnected && selectedMeeting && <div className="text-[13px] text-muted font-medium truncate">{selectedMeeting.title}</div>}
+          </div>
+        </div>
+        <div className="flex items-center gap-2.5 shrink-0">
+          <button onClick={() => setQuestionMode(q => !q)} className={`btn btn-sm ${questionMode ? "bg-accent-tint border border-accent-border text-accent-text font-bold" : "btn-soft"}`}><Sparkles size={14} /> Question mode</button>
+          <button onClick={copyTx} className="icon-btn" title="Copy">{copiedTx ? <Check size={17} className="text-live" /> : <Copy size={17} />}</button>
+          <button onClick={exportMarkdown} className="icon-btn" title="Export Markdown"><Download size={17} /></button>
+        </div>
+      </div>
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-8 pt-2 pb-8">
+        {/* Empty state */}
+        {status !== "connected" && status !== "connecting" && lines.length === 0 && (
+          <div className="h-full flex items-center justify-center">
+            <div className="text-center max-w-[460px] py-10">
+              <div className="mx-auto mb-7 relative grid place-items-center w-[74px] h-[74px] rounded-[20px] bg-accent-tint text-accent">
+                <span className="absolute inset-0 rounded-[20px] live-ring opacity-30" /><Radio size={30} />
+              </div>
+              <h2 className="font-display text-[24px] font-bold text-ink tracking-[-0.02em]">Pick a meeting and hit Connect</h2>
+              <p className="text-[14px] text-muted mt-3 leading-relaxed max-w-[400px] mx-auto">We auto-detect your active Fireflies meetings. Choose one and connect — or paste a meeting ID to jump straight in.</p>
+              <div className="mt-8 grid gap-3.5 text-left">
+                {[{ i: <Search size={17} />, t: "Auto-detect active meetings", d: "Your live sessions appear in the panel — no setup." }, { i: <Plug size={17} />, t: "Pick one & hit Connect", d: "One click streams the transcript here live." }, { i: <Mic size={17} />, t: "Or paste a meeting ID", d: "Grab it from the Fireflies view URL." }].map((c, i) => (
+                  <div key={i} className="flex items-start gap-4 p-4 rounded-control border border-border-soft">
+                    <span className="grid place-items-center w-9 h-9 shrink-0 rounded-[10px] bg-accent-tint text-accent">{c.i}</span>
+                    <div><p className="text-[13.5px] font-bold text-ink">{c.t}</p><p className="text-[12.5px] text-muted mt-1 leading-relaxed">{c.d}</p></div>
+                  </div>
+                ))}
+              </div>
+              <button onClick={() => setMeetingsOpen(true)} className="btn btn-accent mt-7"><Radio size={15} /> See active meetings</button>
+            </div>
+          </div>
+        )}
+        {status === "connecting" && lines.length === 0 && (
+          <div className="h-full flex flex-col items-center justify-center gap-4 text-muted">
+            <RefreshCw size={26} className="animate-spin text-accent" /><p className="text-[14px] font-medium">Connecting to your meeting…</p>
+          </div>
+        )}
+        {/* Question-mode banner */}
+        {questionMode && liveAnswer && (
+          <div className="sticky top-0 z-10 mt-4 mb-6 p-[22px] rounded-2xl border border-accent-border bg-gradient-to-b from-accent-tint to-card shadow-[0_12px_32px_-18px_var(--color-accent)]">
+            <div className="flex items-center gap-3 mb-3">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-accent text-white text-[11.5px] font-bold"><ArrowRight size={13} /> Say this</span>
+              <span className="text-[12.5px] font-semibold text-accent-text">Drafted for you · read it aloud</span>
+              <span className="ml-auto inline-flex items-center gap-1.5 text-[11.5px] text-muted font-medium"><span className="status-dot"><span className="live-ring" /><span className="relative w-2 h-2 rounded-full bg-live" /></span> live</span>
+            </div>
+            <div className="text-[15px] text-ink leading-relaxed"><Markdown text={liveAnswer} /></div>
+          </div>
+        )}
+        {/* Transcript stream */}
+        {lines.length > 0 && (
+          <div className="flex flex-col gap-[22px] pt-4">
+            {grouped.map(l => (
+              <div key={l.id}>
+                <div className={`text-[12.5px] font-bold mb-1.5 ${speakerColor(l.speaker)}`}>{l.speaker}</div>
+                <p className="text-[15.5px] text-[oklch(0.32_0.018_255)] leading-[1.7]">{l.text}{!l.isFinal && <span className="inline-block w-[7px] h-4 bg-accent ml-1 anim-cursor align-middle rounded-sm" />}</p>
+              </div>
+            ))}
+            {isConnected && <div className="flex items-center gap-2 text-muted text-[12.5px] font-medium pt-1"><span className="inline-block w-[7px] h-4 bg-accent anim-cursor rounded-sm" /> Listening…</div>}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  // ── Sidebar (tabbed) ──────────────────────────────────────────────
+  const sidebarCard = (
+    <div className="card flex flex-col min-w-0 min-h-0 overflow-hidden">
+      <div className="flex-1 flex flex-col min-h-0 overflow-y-auto p-[26px] gap-[26px]">
+        {/* Config summary row */}
+        <button onClick={() => setConfigOpen(true)} className="flex items-center gap-3.5 w-full px-[18px] py-4 rounded-[14px] bg-surface-soft border border-border text-left hover:border-accent-border transition-colors shrink-0">
+          <span className="grid place-items-center w-9 h-9 shrink-0 rounded-[10px] bg-accent-tint text-accent"><SlidersHorizontal size={16} /></span>
+          <div className="min-w-0 flex-1">
+            <div className="text-[14px] font-bold text-ink truncate">{agentMode}</div>
+            <div className="text-[12px] text-muted font-medium truncate">{MODEL_LABEL(aiModel)} · {featuresOn} features on</div>
+          </div>
+          <span className="text-[12.5px] font-bold text-accent-text shrink-0">Configure</span>
+        </button>
+
+        {/* Tab strip */}
+        <div className="seg shrink-0">
+          <button data-active={activeTab === "feed"} onClick={() => setActiveTab("feed")} className="seg-item flex-1"><Lightbulb size={14} /> Live feed</button>
+          <button data-active={activeTab === "chat"} onClick={() => setActiveTab("chat")} className="seg-item flex-1"><MessageSquare size={14} /> Chat</button>
+          <button data-active={activeTab === "terminal"} onClick={() => setActiveTab("terminal")} className="seg-item flex-1"><Terminal size={14} /> Terminal</button>
+        </div>
+
+        {/* Tab A — Live feed */}
+        {activeTab === "feed" && (
+          <div className="flex flex-col gap-[22px] min-h-0">
+            <div className="flex items-center justify-between gap-4">
+              <span className="inline-flex items-center gap-2 text-[13px] font-semibold text-ink-2"><Gauge size={15} className="text-muted" /> Pulse rate</span>
+              <select value={pulseMs} onChange={e => setPulseMs(Number(e.target.value))} className="field !w-auto text-[13px] font-semibold py-2 pl-3.5">
+                {PULSE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </div>
+            <div className="flex flex-wrap gap-2.5">
+              {SUGG_FILTERS.map(f => {
+                const count = f.value === "all" ? suggestions.length : suggestions.filter(s => s.type === f.value).length;
+                return <button key={f.value} data-active={suggFilter === f.value} onClick={() => { setSuggFilter(f.value); setSuggExpanded(false); }} className="chip"> {f.label}{f.value !== "all" && count > 0 && <span className="tabular-nums opacity-70">{count}</span>}</button>;
+              })}
+            </div>
+            {!orKey && <span className="inline-flex items-center gap-2 text-[11.5px] font-semibold text-muted"><span className="w-1.5 h-1.5 rounded-full bg-connecting" /> AI offline — set OPENROUTER_API</span>}
+            <div className="flex flex-col gap-3">
+              {filteredSuggestions.length === 0 && <p className="text-[13px] text-muted font-medium leading-relaxed">{suggestions.length === 0 ? "Suggestions stream in here as the conversation evolves — newest on top. Tap one to ask the AI." : "Nothing in this filter yet."}</p>}
+              {visibleSuggestions.map(s => {
+                const st = SUGGESTION_STYLE[s.type];
+                return (
+                  <button key={s.id} onClick={() => handleSuggestion(s)} disabled={aiLoading} className={`group flex items-start gap-3.5 p-[18px] rounded-[14px] border border-border-soft text-left transition-all hover:shadow-card disabled:opacity-50 ${st.border}`}>
+                    <span className={`grid place-items-center w-[34px] h-[34px] shrink-0 rounded-[10px] ${st.tile}`}><st.icon size={16} /></span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2.5"><span className={`text-[10px] font-bold uppercase tracking-wider ${st.color}`}>{st.label}</span><span className="text-[10px] font-semibold text-muted ml-auto tabular-nums">{relTime(s.ts)}</span></div>
+                      <p className="text-[14px] text-ink-2 font-medium leading-[1.55] mt-1.5">{s.text}</p>
+                    </div>
+                  </button>
+                );
+              })}
+              {filteredSuggestions.length > 4 && (
+                <button onClick={() => setSuggExpanded(v => !v)} className="btn btn-soft btn-sm w-full">{suggExpanded ? "Show less" : `Show ${filteredSuggestions.length - 4} more`}</button>
               )}
             </div>
           </div>
+        )}
 
-          {/* Right: view switcher + Active Meetings */}
-          <div className="flex items-center gap-5 shrink-0">
-            <div className="segmented" role="tablist" aria-label="View mode">
-              <button role="tab" aria-selected={viewMode === "transcript"} data-active={viewMode === "transcript"} onClick={() => setViewMode("transcript")} className="segmented-item"><FileText size={14} /> Transcript</button>
-              <button role="tab" aria-selected={viewMode === "split"} data-active={viewMode === "split"} onClick={() => setViewMode("split")} className="segmented-item"><Columns size={14} /> Split</button>
-              <button role="tab" aria-selected={viewMode === "chat"} data-active={viewMode === "chat"} onClick={() => setViewMode("chat")} className="segmented-item"><Sparkles size={14} /> Chat</button>
+        {/* Tab B — Chat */}
+        {activeTab === "chat" && (
+          <div className="flex flex-col gap-5 min-h-0">
+            <div ref={chatScrollRef} className="flex flex-col gap-5 overflow-y-auto -mr-1 pr-1">{chatThread(true)}</div>
+            {composer}
+          </div>
+        )}
+
+        {/* Tab C — Terminal */}
+        {activeTab === "terminal" && (
+          <div className="flex flex-col gap-4 min-h-0">
+            <div className="flex items-center gap-2.5"><span className={`status-dot`}>{bridgeOnline && <span className="live-ring" />}<span className={`relative w-2.5 h-2.5 rounded-full ${bridgeOnline ? "bg-live" : "bg-idle"}`} /></span><span className="text-[13px] font-semibold text-ink-2">{bridgeOnline ? "PI online" : "PI offline"}</span></div>
+            <div ref={termScrollRef} className="term-screen">
+              {termLines.length === 0 ? <div className="term-sys term-line">Delegate shell tasks to your machine.{"\n"}Bridge runs on 127.0.0.1.</div> : termLines.map((l, i) => <div key={i} className={`term-line term-${l.stream}`}>{l.text}</div>)}
+              {termRunning && <div className="term-sys term-line inline-flex items-center gap-2 pt-1"><RefreshCw size={12} className="animate-spin" /> running…</div>}
             </div>
-            <div className="h-7 w-px bg-border" />
-            {activeMeetingsControl}
-          </div>
-        </header>
-
-        {/* === MAIN WORKSPACE === */}
-        <div className="flex-1 flex min-h-0 pb-8 lg:pb-10">
-          <div className="flex-1 flex min-h-0 rounded-3xl border border-border bg-surface-1/60 backdrop-blur-sm overflow-hidden shadow-[0_24px_60px_-32px_rgba(14,21,37,0.22)]">
-            {/* Chat-only view: dedicated centered AI chat, full height */}
-            {viewMode === "chat" ? (
-              chatView
-            ) : (
-              <>
-                <div
-                  className="flex flex-col min-w-0 min-h-0"
-                  style={viewMode === "split" ? { width: `${splitPct}%` } : { flex: "1 1 0%" }}>
-                  {transcriptColumn}
-                </div>
-
-                {viewMode === "split" && (
-                  <>
-                    <div className="split-divider" onMouseDown={startResize} role="separator" aria-orientation="vertical" aria-label="Resize panels" title="Drag to resize">
-                      <span className="grip" />
-                    </div>
-                    <aside className="flex flex-col min-w-0 min-h-0 flex-1 bg-surface-1/40 px-6">
-                      {sidebar}
-                    </aside>
-                  </>
-                )}
-              </>
+            {pendingCmd && (
+              <div className="confirm-bar p-[18px] space-y-3">
+                <p className="text-[13px] font-bold text-[oklch(0.45_0.12_70)]">Run this on your machine?</p>
+                <pre className="font-mono text-[12.5px] text-ink bg-card border border-border rounded-[10px] px-3.5 py-3 overflow-x-auto whitespace-pre-wrap break-words">{usePI ? `pi $ ${pendingCmd}` : `$ ${pendingCmd}`}</pre>
+                <div className="flex items-center gap-3"><button onClick={confirmRun} className="btn btn-accent btn-sm"><Play size={12} /> Run command</button><button onClick={cancelPending} className="btn btn-soft btn-sm"><X size={12} /> Cancel</button></div>
+              </div>
             )}
+            <div className="field flex items-center gap-2.5 pl-4 pr-2 py-2">
+              <Terminal size={15} className="text-muted shrink-0" />
+              <input value={termInput} onChange={e => setTermInput(e.target.value)} onKeyDown={e => e.key === "Enter" && requestRun()} disabled={termRunning || !bridgeOnline} placeholder={usePI ? "Describe a task to delegate…" : "Type a shell command…"}
+                className="flex-1 bg-transparent text-[13px] font-mono text-ink placeholder-muted outline-none disabled:opacity-50 min-w-0" />
+              <button onClick={requestRun} disabled={termRunning || !bridgeOnline} className="chat-send !w-[38px] !h-[38px]" title="Send"><Send size={15} /></button>
+            </div>
+            <button onClick={() => setUsePI(v => !v)} className="flex items-center gap-3 w-full px-4 py-3 rounded-control bg-surface-soft border border-border text-left">
+              <Plug size={15} className="text-muted shrink-0" /><span className="text-[13px] font-semibold text-ink-2 flex-1">Route through PI</span>
+              <span className="switch" data-on={usePI}><span className="knob" /></span>
+            </button>
           </div>
+        )}
+      </div>
+    </div>
+  );
+
+  // ── Chat view (centered 820px column) ─────────────────────────────
+  const chatView = (
+    <div className="card flex-1 flex justify-center min-h-0 overflow-hidden">
+      <div className="flex flex-col w-full max-w-[820px] min-h-0 px-7">
+        <div className="flex items-center gap-4 pt-9 pb-7 shrink-0">
+          <span className="chat-avatar !w-11 !h-11 !rounded-2xl"><Sparkles size={20} /></span>
+          <div><h2 className="font-display text-[18px] font-bold text-ink tracking-[-0.01em] leading-none">AI assistant</h2><p className="text-[13px] text-muted font-medium mt-2">Ask anything about this meeting{!orKey && " · AI offline"}</p></div>
+        </div>
+        <div ref={chatScrollRef} className="flex-1 overflow-y-auto pb-7 flex flex-col gap-6">{chatThread(false)}</div>
+        <div className="pt-2 pb-9 shrink-0">{composer}</div>
+      </div>
+    </div>
+  );
+
+  // ── Config slide-over ─────────────────────────────────────────────
+  const slideOver = configOpen && (
+    <>
+      <div className="slideover-backdrop" onClick={() => setConfigOpen(false)} aria-hidden />
+      <div className="slideover anim-slideover">
+        <div className="flex items-center justify-between px-[30px] py-5 border-b border-border-soft bg-[oklch(0.99_0.003_250)]/90 backdrop-blur sticky top-0">
+          <span className="inline-flex items-center gap-2.5 font-display text-[16px] font-bold text-ink"><SlidersHorizontal size={17} className="text-accent" /> Agent configuration</span>
+          <button onClick={() => setConfigOpen(false)} className="icon-btn !w-9 !h-9"><X size={16} /></button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-[30px] flex flex-col gap-[34px]">
+          {/* Agent mode */}
+          <section className="flex flex-col gap-4">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-[15.5px] font-bold text-ink">Agent mode</h3>
+              <button onClick={handleProposeModes} disabled={proposingModes || grouped.length === 0} className="chip chip-dashed">{proposingModes ? <><RefreshCw size={13} className="animate-spin" /> Reading…</> : <><Wand2 size={13} /> Suggest from meeting</>}</button>
+            </div>
+            <div className="flex flex-wrap gap-2.5">
+              {AGENT_MODES.map(m => <button key={m.label} data-active={agentMode === m.label} onClick={() => pickMode(m.label, m.context)} className="chip chip-mode">{m.label}</button>)}
+              {proposedModes.map(m => <button key={`p-${m.label}`} data-active={agentMode === m.label} onClick={() => pickMode(m.label, m.context)} className="chip chip-mode" title={m.context}><Sparkles size={12} /> {m.label}</button>)}
+            </div>
+            <textarea value={agentContext} onChange={e => setAgentContext(e.target.value)} rows={3} placeholder="Or write a custom context: 'You're advising the host; goal is to close the deal.'" className="field px-4 py-3.5 leading-relaxed resize-none" />
+          </section>
+          <div className="border-t border-border-soft" />
+          {/* AI model */}
+          <section className="flex flex-col gap-4">
+            <div><h3 className="text-[15.5px] font-bold text-ink">AI model</h3><p className="text-[12.5px] text-muted font-medium mt-1">Routed through OpenRouter</p></div>
+            {[...new Set(AI_MODELS.map(m => m.group))].map(g => (
+              <div key={g} className="flex flex-col gap-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-muted">{g}</span>
+                <div className="flex flex-col gap-2">
+                  {AI_MODELS.filter(m => m.group === g).map(m => (
+                    <button key={m.value} onClick={() => setAiModel(m.value)} className={`flex items-center justify-between px-4 py-3 rounded-control border text-left transition-colors ${aiModel === m.value ? "bg-accent-tint border-accent-border text-accent-text" : "border-border-soft hover:border-accent-border"}`}>
+                      <span className="text-[13.5px] font-semibold">{m.label}</span>{aiModel === m.value && <Check size={16} className="text-accent" />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </section>
+          <div className="border-t border-border-soft" />
+          {/* Features */}
+          <section className="flex flex-col gap-3">
+            <h3 className="text-[15.5px] font-bold text-ink">Features</h3>
+            {FEATURE_FLAGS.map(k => (
+              <button key={k} onClick={() => setFlags(p => ({ ...p, [k]: !p[k] }))} className="flex items-center gap-3 w-full px-4 py-3 rounded-control border border-border-soft text-left">
+                <span className="text-[13.5px] font-semibold text-ink-2 flex-1">{k}</span><span className="switch" data-on={!!flags[k]}><span className="knob" /></span>
+              </button>
+            ))}
+          </section>
         </div>
       </div>
+    </>
+  );
+
+  // ── Render ────────────────────────────────────────────────────────
+  return (
+    <div className="h-screen p-7 flex justify-center">
+      <div className="w-full max-w-[1660px] h-full flex flex-col gap-[18px] min-h-0">
+        {header}
+        <div className="flex-1 flex gap-[18px] min-h-0">
+          {viewMode === "chat" ? chatView : (
+            <>
+              <div className="flex min-w-0 min-h-0" style={viewMode === "split" ? { flexBasis: `${splitPct}%`, flexGrow: 0, flexShrink: 0 } : { flex: "1 1 0%" }}>{transcriptCard}</div>
+              {viewMode === "split" && (
+                <>
+                  <div className="split-divider" onMouseDown={startResize} role="separator" title="Drag to resize"><span className="grip" /></div>
+                  <div className="flex-1 flex min-w-0 min-h-0">{sidebarCard}</div>
+                </>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+      {slideOver}
     </div>
   );
 }
