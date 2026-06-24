@@ -289,6 +289,7 @@ export default function App() {
   const [proposingModes, setProposingModes] = useState(false);
   // Backend bridge (localhost command runner / PI delegation)
   const [bridgeOnline, setBridgeOnline] = useState(false);
+  const [bridgeToken, setBridgeToken] = useState("");
   const [termInput, setTermInput] = useState("");
   const [termLines, setTermLines] = useState<{ stream: "out" | "err" | "sys"; text: string }[]>([]);
   const [termRunning, setTermRunning] = useState(false);
@@ -304,7 +305,7 @@ export default function App() {
   const connRef = useRef<{ connect: () => Promise<void>; disconnect: () => void } | null>(null);
   const lastSpeakerRef = useRef(""); const lineCounter = useRef(0); const lastSuggestRef = useRef(0); const lastAnswerRef = useRef(0);
 
-  useEffect(() => { fetch("/api/fireflies-key").then(r => r.json()).then(d => { if (d.ffKey) setFfKey(d.ffKey); if (d.orKey) setOrKey(d.orKey); }).catch(() => {}); }, []);
+  useEffect(() => { fetch("/api/fireflies-key").then(r => r.json()).then(d => { if (d.ffKey) setFfKey(d.ffKey); if (d.orKey) setOrKey(d.orKey); if (d.bridgeToken) setBridgeToken(d.bridgeToken); }).catch(() => {}); }, []);
   useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" }); }, [lines]);
   useEffect(() => { chatScrollRef.current?.scrollTo({ top: chatScrollRef.current.scrollHeight, behavior: "smooth" }); }, [chatMessages]);
   useEffect(() => { termScrollRef.current?.scrollTo({ top: termScrollRef.current.scrollHeight }); }, [termLines]);
@@ -426,7 +427,7 @@ export default function App() {
     setTermInput(""); setTermRunning(true);
     setTermLines(prev => [...prev, { stream: "sys", text: `$ ${cmd}` }]);
     try {
-      const res = await fetch("/bridge/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cmd }) });
+      const res = await fetch("/bridge/run", { method: "POST", headers: { "Content-Type": "application/json", "Authorization": `Bearer ${bridgeToken}` }, body: JSON.stringify({ cmd }) });
       const reader = res.body!.getReader(); const dec = new TextDecoder(); let buf = "";
       for (;;) {
         const { value, done } = await reader.read(); if (done) break;

@@ -4,6 +4,10 @@ import tailwindcss from '@tailwindcss/vite'
 import fs from 'fs'
 import path from 'path'
 import { spawn } from 'child_process'
+import { randomUUID } from 'node:crypto'
+
+// Per-session secret shared between the bridge and the frontend (via /api/fireflies-key).
+const bridgeToken = randomUUID()
 
 // Boot the localhost-only command bridge alongside the dev server so it only
 // exists while Fireflies Live is open. Killed when Vite exits.
@@ -11,7 +15,7 @@ function bridgePlugin() {
   return {
     name: 'fireflies-bridge',
     configureServer() {
-      const child = spawn('node', ['server/bridge.mjs'], { stdio: 'inherit', env: process.env })
+      const child = spawn('node', ['server/bridge.mjs'], { stdio: 'inherit', env: { ...process.env, BRIDGE_TOKEN: bridgeToken } })
       const kill = () => { try { child.kill() } catch {} }
       process.on('exit', kill); process.on('SIGINT', () => { kill(); process.exit() }); process.on('SIGTERM', () => { kill(); process.exit() })
     },
@@ -31,7 +35,7 @@ function firefliesKeyPlugin() {
           const ffKey = ffMatch ? ffMatch[1].trim() : ''
           const orKey = orMatch ? orMatch[1].trim() : ''
           res.setHeader('Content-Type', 'application/json')
-          res.end(JSON.stringify({ ffKey, orKey }))
+          res.end(JSON.stringify({ ffKey, orKey, bridgeToken }))
         } catch {
           res.end(JSON.stringify({ key: '' }))
         }
