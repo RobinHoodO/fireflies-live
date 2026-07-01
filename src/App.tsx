@@ -260,7 +260,7 @@ export default function App() {
     fetchLiveAnswer(ctx, orKey, agentContext, aiModel).then(a => setLiveAnswer(a && a !== "—" ? a : "")).catch(() => {});
   }, [lines, questionMode, orKey, agentContext, aiModel]);
 
-  const useManualId = () => {
+  const setManualMeeting = () => {
     if (!manualId.trim()) return;
     setSelectedMeeting({ id: manualId.trim(), title: "Manual meeting", date: new Date().toISOString(), active: true });
     setMeetingStatus("Using manual ID");
@@ -368,7 +368,32 @@ export default function App() {
 
   const copyTx = () => { navigator.clipboard.writeText(getCtx()); setCopiedTx(true); setTimeout(() => setCopiedTx(false), 2000); };
   const exportMarkdown = () => {
-    const md = [`# ${selectedMeeting?.title || "Meeting"}`, `\n## Transcript\n`, grouped.map(l => `**${l.speaker}:** ${l.text}`).join("\n\n") || "_No transcript._", `\n## Chat\n`, chatMessages.map(m => `**${m.role === "user" ? "You" : "AI"}:** ${m.text}`).join("\n\n") || "_None._"].join("\n");
+    const exportedAt = new Date().toLocaleString();
+    const transcript = grouped.map(l => `**${l.speaker}:** ${l.text}`).join("\n\n") || "_No transcript._";
+    const liveFeed = suggestions.map(s => {
+      const st = SUGGESTION_STYLE[s.type];
+      return `- **${st.label}** (${new Date(s.ts).toLocaleString()}): ${s.text}`;
+    }).join("\n") || "_No live feed items._";
+    const chat = chatMessages.map(m => {
+      const who = m.role === "user" ? "You" : m.role === "agent" ? "AI" : "Suggestion";
+      return `**${who}** (${new Date(m.timestamp).toLocaleString()}):\n${m.text}`;
+    }).join("\n\n") || "_No chat messages._";
+    const piLog = termLines.map(l => {
+      const label = l.stream === "cmd" ? "Command" : l.stream === "out" ? "Output" : l.stream === "err" ? "Error" : "System";
+      return `[${label}] ${l.text}`;
+    }).join("\n") || "_No PI command log entries._";
+    const sections = [
+      `# ${selectedMeeting?.title || "Meeting"}`,
+      `Exported: ${exportedAt}`,
+      selectedMeeting?.id ? `Meeting ID: \`${selectedMeeting.id}\`` : "",
+      `Status: ${statusLabel}`,
+      `\n## Transcript\n${transcript}`,
+      `\n## Live Feed\n${liveFeed}`,
+      liveAnswer ? `\n## Question Mode Draft\n${liveAnswer}` : "",
+      `\n## Full Chat\n${chat}`,
+      `\n## PI Command Log\n\`\`\`text\n${piLog.replace(/```/g, "'''")}\n\`\`\``,
+    ];
+    const md = sections.filter(Boolean).join("\n\n");
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([md], { type: "text/markdown" }));
     a.download = `fireflies-${Date.now()}.md`; a.click(); URL.revokeObjectURL(a.href);
@@ -459,9 +484,9 @@ export default function App() {
             <div className="mt-5 pt-5 border-t border-border-soft space-y-3">
               <span className="block text-[12.5px] font-bold text-ink-2">Paste a meeting ID</span>
               <div className="field flex items-center gap-2.5 pl-4 pr-2 py-2">
-                <input placeholder="app.fireflies.ai/view/…" value={manualId} onChange={e => setManualId(e.target.value)} onKeyDown={e => e.key === "Enter" && useManualId()}
+                <input placeholder="app.fireflies.ai/view/…" value={manualId} onChange={e => setManualId(e.target.value)} onKeyDown={e => e.key === "Enter" && setManualMeeting()}
                   className="flex-1 bg-transparent text-[13px] font-mono text-ink placeholder-muted outline-none min-w-0" />
-                <button onClick={useManualId} disabled={!manualId.trim()} className="btn btn-soft btn-sm">Set</button>
+                <button onClick={setManualMeeting} disabled={!manualId.trim()} className="btn btn-soft btn-sm">Set</button>
               </div>
               {selectedMeeting && <button onClick={() => { handleConnect(); setMeetingsOpen(false); }} disabled={isConnected || status === "connecting"} className="btn btn-accent btn-sm w-full"><Play size={12} /> Connect</button>}
             </div>
@@ -509,7 +534,7 @@ export default function App() {
         <div className="flex items-center gap-2.5 shrink-0">
           <button onClick={() => setQuestionMode(q => !q)} className={`btn btn-sm ${questionMode ? "bg-accent-tint border border-accent-border text-accent-text font-bold" : "btn-soft"}`}><Sparkles size={14} /> Question mode</button>
           <button onClick={copyTx} className="icon-btn" title="Copy">{copiedTx ? <Check size={17} className="text-live" /> : <Copy size={17} />}</button>
-          <button onClick={exportMarkdown} className="icon-btn" title="Export Markdown"><Download size={17} /></button>
+          <button onClick={exportMarkdown} className="icon-btn" title="Export all outputs"><Download size={17} /></button>
         </div>
       </div>
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-8 pt-2 pb-8">

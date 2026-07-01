@@ -2,10 +2,8 @@ import type {
   TranscriptChunk,
   TranscriptMessage,
   ConnectionStatus,
-  FeatureFlags,
 } from '../types';
 
-const SIMULATED_SPEAKERS = ['Alice Chen', 'Marcus Johnson', 'Sarah Kim', 'David Park'];
 const SIMULATED_CONVERSATION: [string, string][] = [
   ['Alice Chen', 'Alright, let\'s kick off the sprint planning. We need to finalize the API integration timeline.'],
   ['Marcus Johnson', 'I\'ve been looking at the Fireflies API docs. The real-time WebSocket looks solid — we can stream live transcription.'],

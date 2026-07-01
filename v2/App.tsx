@@ -246,7 +246,22 @@ export default function App() {
 
   const copyTx = () => { navigator.clipboard.writeText(getCtx()); setCopied(true); setTimeout(() => setCopied(false), 2000); };
   const exportMd = () => {
-    const md = [`# ${selectedMeeting?.title || "Meeting"}`, `\n## Transcript\n`, grouped.map(l => `**${l.speaker}:** ${l.text}`).join("\n\n") || "_No transcript._", `\n## Chat\n`, messages.map(m => `**${m.role === "user" ? "You" : "AI"}:** ${m.text}`).join("\n\n") || "_None._"].join("\n");
+    const transcript = grouped.map(l => `**${l.speaker}:** ${l.text}`).join("\n\n") || "_No transcript._";
+    const liveFeed = suggestions.map(s => `- **${SUGMETA[s.type]?.kind || s.type}** (${new Date(s.t).toLocaleString()}): ${s.text}`).join("\n") || "_No live feed items._";
+    const chat = messages.map(m => `**${m.role === "user" ? "You" : "AI"}:**\n${m.text}`).join("\n\n") || "_No chat messages._";
+    const piLog = piMessages.map(m => `[${m.role === "user" ? "Command" : "PI"}] ${m.text}`).join("\n") || "_No PI command log entries._";
+    const sections = [
+      `# ${selectedMeeting?.title || "Meeting"}`,
+      `Exported: ${new Date().toLocaleString()}`,
+      selectedMeeting?.id ? `Meeting ID: \`${selectedMeeting.id}\`` : "",
+      `Status: ${statusLabel}`,
+      `\n## Transcript\n${transcript}`,
+      `\n## Live Feed\n${liveFeed}`,
+      liveAnswer ? `\n## Question Mode Draft\n${liveAnswer}` : "",
+      `\n## Full Chat\n${chat}`,
+      `\n## PI Command Log\n\`\`\`text\n${piLog.replace(/```/g, "'''")}\n\`\`\``,
+    ];
+    const md = sections.filter(Boolean).join("\n\n");
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([md], { type: "text/markdown" }));
     a.download = `fireflies-${Date.now()}.md`; a.click(); URL.revokeObjectURL(a.href);
@@ -395,7 +410,7 @@ export default function App() {
           <div style={{ display: "flex", alignItems: "center", gap: 10, flex: "0 0 auto" }}>
             <button onClick={() => setQuestionMode(q => !q)} style={qBtnStyle(questionMode)}><Icon id="i-sparkles" size={16} />Question mode</button>
             <button onClick={copyTx} title="Copy" className="fl-hover-soft" style={{ ...iconBtn }}><Icon id={copied ? "i-check" : "i-copy"} size={17} stroke={copied ? "oklch(0.6 0.14 155)" : "currentColor"} /></button>
-            <button onClick={exportMd} title="Export to Markdown" className="fl-hover-soft" style={{ ...iconBtn }}><Icon id="i-download" size={17} /></button>
+            <button onClick={exportMd} title="Export all outputs" className="fl-hover-soft" style={{ ...iconBtn }}><Icon id="i-download" size={17} /></button>
           </div>
         )}
       </div>
