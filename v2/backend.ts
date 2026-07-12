@@ -31,6 +31,19 @@ export async function fetchKeys(): Promise<{ ffKey: string; orKey: string; bridg
   }
 }
 
+export async function fileMeeting(title: string, markdown: string, bridgeToken: string): Promise<{ ok: boolean; path?: string; error?: string }> {
+  try {
+    const r = await fetch("/bridge/file", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${bridgeToken}` },
+      body: JSON.stringify({ title, markdown }),
+    });
+    return await r.json();
+  } catch {
+    return { ok: false, error: "bridge offline" };
+  }
+}
+
 function clock(iso: string): string {
   const d = new Date(iso);
   return isNaN(d.getTime()) ? "" : `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;

@@ -9,6 +9,7 @@ mock content was removed and replaced with live data.
 - **OpenRouter** for live suggestions, the question-mode "Say this" answer, the chat
   assistant, and "Suggest agent mode from meeting".
 - **Localhost command bridge** (`../server/bridge.mjs`) for the Terminal tab.
+- **Meeting filing** writes to `~/Thrivbe-AI/content/meetings/transcripts/` for the meeting-analyser pipeline.
 - Keys are injected by the dev server from `/Users/robinsverd/Thrivbe-AI/.env`
   (`FIREFLY_API_KEY`, `OPENROUTER_API`) via `/api/fireflies-key` — never in client code.
 

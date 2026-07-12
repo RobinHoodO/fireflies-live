@@ -14,7 +14,7 @@ import {
 } from "./data";
 import {
   fetchKeys, fetchMeetings, callAI, fetchSuggestions, streamLiveAnswer, streamPI, proposeModes,
-  connectLive, connectDemo, MODE_CONTEXT, type Meeting, type ConnStatus,
+  connectLive, connectDemo, fileMeeting, MODE_CONTEXT, type Meeting, type ConnStatus,
 } from "./backend";
 
 // Persisted UI config — survives reloads / new sessions (localStorage).
@@ -84,6 +84,7 @@ export default function App() {
   const [lines, setLines] = useState<Line[]>(() => Array.isArray(SESSION.lines) ? SESSION.lines.filter((l: any) => l && typeof l.speaker === "string" && typeof l.text === "string" && typeof l.id === "string").slice(-500) : []);
   const [liveAnswer, setLiveAnswer] = useState("");
   const [copied, setCopied] = useState(false);
+  const [filed, setFiled] = useState<"idle" | "filing" | "done" | "error">("idle");
 
   const splitElRef = useRef<HTMLDivElement>(null);
   const chatComposerRef = useRef<HTMLTextAreaElement>(null);
@@ -232,8 +233,6 @@ export default function App() {
     const meeting: Meeting | undefined = id ? { id, title: "Manual meeting", sub: "", time: "", active: true } : (selectedMeeting ?? undefined);
     startConnection(meeting);
   };
-  const stop = () => connRef.current?.disconnect();
-
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.isComposing || (!e.metaKey && !e.ctrlKey)) return;
@@ -300,7 +299,7 @@ export default function App() {
   };
 
   const copyTx = () => { navigator.clipboard.writeText(getCtx()); setCopied(true); setTimeout(() => setCopied(false), 2000); };
-  const exportMd = () => {
+  const buildMd = () => {
     const transcript = grouped.map(l => `**${l.speaker}:** ${l.text}`).join("\n\n") || "_No transcript._";
     const liveFeed = suggestions.map(s => `- **${SUGMETA[s.type]?.kind || s.type}** (${new Date(s.t).toLocaleString()}): ${s.text}`).join("\n") || "_No live feed items._";
     const chat = messages.map(m => `**${m.role === "user" ? "You" : "AI"}:**\n${m.text}`).join("\n\n") || "_No chat messages._";
@@ -316,11 +315,24 @@ export default function App() {
       `\n## Full Chat\n${chat}`,
       `\n## PI Command Log\n\`\`\`text\n${piLog.replace(/```/g, "'''")}\n\`\`\``,
     ];
-    const md = sections.filter(Boolean).join("\n\n");
+    return sections.filter(Boolean).join("\n\n");
+  };
+  const exportMd = () => {
+    const md = buildMd();
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([md], { type: "text/markdown" }));
     a.download = `fireflies-${Date.now()}.md`; a.click(); URL.revokeObjectURL(a.href);
   };
+  const fileMeetingNow = async () => {
+    if (!bridgeOnline) { setFiled("error"); setTimeout(() => setFiled("idle"), 2500); return; }
+    setFiled("filing");
+    try {
+      const r = await fileMeeting(selectedMeeting?.title || "Meeting", buildMd(), bridgeToken);
+      setFiled(r.ok ? "done" : "error");
+    } catch { setFiled("error"); }
+    setTimeout(() => setFiled("idle"), 2500);
+  };
+  const stop = () => { connRef.current?.disconnect(); if (grouped.length > 0 && bridgeOnline) fileMeetingNow(); };
 
   const startDrag = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -465,6 +477,7 @@ export default function App() {
         {(isConnected || grouped.length > 0) && (
           <div style={{ display: "flex", alignItems: "center", gap: 10, flex: "0 0 auto" }}>
             <button onClick={copyTx} title="Copy" className="fl-hover-soft" style={{ ...iconBtn }}><Icon id={copied ? "i-check" : "i-copy"} size={17} stroke={copied ? "oklch(0.6 0.14 155)" : "currentColor"} /></button>
+            <button onClick={fileMeetingNow} disabled={filed === "filing"} title="File to Thrivbe workspace" className="fl-hover-soft" style={{ ...iconBtn, opacity: filed === "filing" ? 0.5 : 1, cursor: filed === "filing" ? "default" : "pointer" }}><Icon id={filed === "done" ? "i-check" : "i-file"} size={17} stroke={filed === "done" ? "oklch(0.6 0.14 155)" : filed === "error" ? "oklch(0.55 0.16 25)" : "currentColor"} /></button>
             <button onClick={exportMd} title="Export all outputs" className="fl-hover-soft" style={{ ...iconBtn }}><Icon id="i-download" size={17} /></button>
           </div>
         )}

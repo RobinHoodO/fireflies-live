@@ -12,7 +12,8 @@
 
 import http from "node:http";
 import { spawn } from "node:child_process";
-import { appendFile } from "node:fs/promises";
+import { appendFile, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import path from "node:path";
 
 const HOST = "127.0.0.1";
@@ -20,6 +21,7 @@ const PORT = Number(process.env.BRIDGE_PORT) || 8787;
 const AUDIT = path.resolve(process.cwd(), "server", "audit.log");
 const MAX_OUTPUT = 200_000; // bytes per run, then truncate
 const MAX_MS = 120_000;     // hard timeout per command
+const FILE_DIR = "/Users/robinsverd/Thrivbe-AI/content/meetings/transcripts";
 
 // Catastrophic patterns we refuse outright. Not a security boundary against a
 // determined operator (it's their machine) — a guard against fat-finger disasters.
@@ -162,6 +164,46 @@ const server = http.createServer((req, res) => {
       send(res, { type: "start", cmd: "pi" });
       // No shell: args are passed as argv, so the message can never break out to the shell.
       streamChild(res, spawn("pi", ["--print", "--offline", "--session-id", sessionId, message], { env: piEnv(), stdio: ["ignore", "pipe", "pipe"] }));
+    });
+    return;
+  }
+
+  // Fixed destination for meeting records. The caller supplies content only, never a path.
+  // Body: { title, markdown }.
+  if (req.method === "POST" && req.url === "/file") {
+    if (!TOKEN || req.headers.authorization !== `Bearer ${TOKEN}`) {
+      res.writeHead(401, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: "unauthorized" })); return;
+    }
+    if (!String(req.headers["content-type"] || "").includes("application/json")) {
+      res.writeHead(415, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: "json only" })); return;
+    }
+    let body = "", bytes = 0;
+    req.on("data", (c) => { body += c; bytes += c.length; if (bytes > 2_000_000) req.destroy(); });
+    req.on("end", async () => {
+      let title, markdown;
+      try { const j = JSON.parse(body); title = j.title; markdown = j.markdown; } catch {}
+      if (typeof title !== "string" || typeof markdown !== "string" || !markdown.trim()) {
+        res.writeHead(400, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: "title and non-empty markdown required" })); return;
+      }
+      const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60).replace(/^-+|-+$/g, "") || "meeting";
+      const date = new Date().toISOString().slice(0, 10);
+      let filename = "";
+      for (let n = 1; n <= 50; n++) {
+        const candidate = `${date}-${slug}-live${n === 1 ? "" : `-${n}`}.md`;
+        if (!existsSync(path.join(FILE_DIR, candidate))) { filename = candidate; break; }
+      }
+      if (!filename) {
+        res.writeHead(409, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: "filename conflict" })); return;
+      }
+      const filePath = path.join(FILE_DIR, filename);
+      try {
+        await writeFile(filePath, markdown);
+      } catch {
+        res.writeHead(500, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: "file write failed" })); return;
+      }
+      const bytes = Buffer.byteLength(markdown);
+      await appendFile(AUDIT, `${new Date().toISOString()} FILE ${filename} (${bytes} bytes)\n`).catch(() => {});
+      res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify({ ok: true, path: filePath }));
     });
     return;
   }
