@@ -17,7 +17,7 @@ backend. Light, spacious, futuristic UI.
 | 🧩 **4** | Chrome extension form factor | ⬜ planned |
 | 🧠 **5** | Intelligence & polish | ⬜ later |
 | 🌐 **6** | Thrivbe OS integration | 🟡 **6.1 End & File shipped 2026-07-12** |
-| 🧭 **7** | Adaptive Navigator | 🟡 in build — design: [`ADAPTIVE-NAVIGATOR.md`](./ADAPTIVE-NAVIGATOR.md) |
+| 🧭 **7** | Adaptive Navigator | ✅ **7.1–7.3 shipped 2026-07-12** (7.4 kernel-native ⬜) — design: [`ADAPTIVE-NAVIGATOR.md`](./ADAPTIVE-NAVIGATOR.md) |
 
 ```
 before 📅 ──────── during 🔴 LIVE ──────── after 📝
@@ -137,14 +137,25 @@ Twenty after). Weave, in order of leverage:
                   semsearch :3015       phase·stance·next move       suggestions/chat
 ```
 
-- ⬜ 🎯 **7.1 Goal card** — free-text intent at connect (objective, red lines, desired
-  outcome); every prompt (suggestions, "Say this", chat, navigator) goal-conditioned.
-- ⬜ 🧭 **7.2 Navigator strip** — 45s pulse → situation frame `{phase, stance,
-  goal_progress, next_move, risk}` shown as a pinned strip + injected downstream.
-- ⬜ 🌌 **7.3 Constellation** — bridge `POST /context` fans out over turbovec corpora
-  (📜 meetings 125 · 📚 wiki_skills 10.5K · 🧠 notion 34K · 🧑 people 2K) + local
-  meeting analyses + `clients/` folders → compact bundle + source chips; adaptive,
-  not a template — assembled from Robin's request.
+- ✅ 🎯 **7.1 Goal card** *(2026-07-12)* — free-text intent at connect (objective, red
+  lines, desired outcome); 🎯 pill in the sidebar; every prompt (suggestions, "Say
+  this", chat, navigator) goal-conditioned; persisted.
+- ✅ 🧭 **7.2 Navigator strip** *(2026-07-12)* — 45s pulse → situation frame `{phase,
+  stance, goal_progress, next_move, risk}` pinned above the transcript with manual ↻,
+  injected into every fast-loop prompt, in export/File output. Wire-verified: real
+  frame on a discount push → *"Anchor ROI math, then propose paid pilot at list price."*
+- ✅ 🌌 **7.3 Constellation** *(2026-07-12)* — bridge `POST /context` fans out over
+  turbovec corpora (📜 meetings 125 · 📚 wiki_skills 10.5K · 🧠 notion 34K · 🧑 people
+  2K, 6s timeouts, score floor) + local meeting analyses + `clients/` folders →
+  ≤8KB bundle + source chips (🧑1 📜2 📚6 🧠4 📁1 in live test); adaptive, not a
+  template — assembled from Robin's request; grounds all guidance.
+- ✅ ⚡ **Fast + cheap** *(2026-07-12)* — live loops (suggestions/Say-this/navigator)
+  on a dedicated fast model (default 🐇 Haiku 4.5), chat on the quality model;
+  pulse context capped (last-40 lines, 1.5KB bundle slice vs 6KB for chat).
+- ✅ 🔁 **Follow-through** *(2026-07-12)* — the pulse tracks execution: Robin says the
+  suggested thing → suggestion flips to ✓ Done with *how it landed* ("↳ Team writes
+  ~120 recaps/week, their biggest time sink") — zero extra API calls; stays in
+  touch with where the conversation is.
 - ⬜ 🏢 **7.4 Kernel-native** — retrieval + guidance via Thrivbe-1 kernel (private
   routing, full wiki text, Twenty/Notion enrichment). Merges with 6.2/6.3.
 

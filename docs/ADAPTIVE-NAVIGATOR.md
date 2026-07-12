@@ -107,11 +107,30 @@ and Twenty/Notion enrichment server-side.
 
 ## 6. 🚀 Build phases
 
-| Step | Scope | Infra |
-|---|---|---|
-| 🎯 **7.1 Goal card** | Intent composer; every prompt goal-conditioned | none — prompts + one textarea |
-| 🧭 **7.2 Navigator strip** | 45 s situation-frame pulse + strip + downstream injection | none — one more OpenRouter call |
-| 🌌 **7.3 Constellation** | bridge `/context` fan-out over semsearch corpora + local files; chips UI; bundle injection | bridge endpoint (pattern exists) |
-| 🏢 **7.4 Kernel-native** | retrieval/guidance via Thrivbe-1 kernel; full wiki text; Twenty/Notion; private routing | merges with 6.2/6.3 |
+| Step | Scope | Infra | Status |
+|---|---|---|---|
+| 🎯 **7.1 Goal card** | Intent composer; every prompt goal-conditioned | none — prompts + one textarea | ✅ 2026-07-12 |
+| 🧭 **7.2 Navigator strip** | 45 s situation-frame pulse + strip + downstream injection | none — one more OpenRouter call | ✅ 2026-07-12 |
+| 🌌 **7.3 Constellation** | bridge `/context` fan-out over semsearch corpora + local files; chips UI; bundle injection | bridge endpoint (pattern exists) | ✅ 2026-07-12 |
+| ⚡🔁 **Fast + follow-through** | pulse loops on a fast model (Haiku 4.5 default), capped contexts; suggestion execution tracked → ✓ done + outcome, zero extra calls | none | ✅ 2026-07-12 |
+| 🏢 **7.4 Kernel-native** | retrieval/guidance via Thrivbe-1 kernel; full wiki text; Twenty/Notion; private routing | merges with 6.2/6.3 | ⬜ |
 
 Ship order = value order: 7.1 is ~80 % of the felt difference at zero infra.
+
+## 7. ⚡🔁 Addendum (2026-07-12): speed, cost, and staying in touch
+
+Robin's follow-up requirement: *"very fast yet efficient cost wise … if it suggests
+something I should say it also tracks me saying that and then the response of the
+other person — analysing live."* Folded in as a fourth slice:
+
+- **Model tiering** — the three live loops run on a dedicated fast model
+  (`fastModel`, default Claude Haiku 4.5; picker in the slide-over); chat & deep
+  answers keep the quality model.
+- **Context caps** — pulse transcript trimmed to the last 40 lines (was: full
+  transcript every 12 s — an unbounded cost leak); constellation bundle sliced
+  1.5 KB for pulses vs 6 KB for chat.
+- **Follow-through loop** — the existing 12 s pulse now compares its own past
+  suggestions against the fresh transcript: acted-on suggestions come back as
+  `{id, status:"done", outcome:"<how the other side responded>"}` — rendered
+  ✓ Done + "↳ outcome" in the feed, preserved through persistence and export.
+  Zero additional API calls. Verified live on Haiku 4.5.
