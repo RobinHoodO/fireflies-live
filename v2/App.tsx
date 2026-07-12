@@ -14,7 +14,7 @@ import {
 } from "./data";
 import {
   fetchKeys, fetchMeetings, callAI, fetchSuggestions, streamLiveAnswer, streamPI, proposeModes,
-  connectLive, connectDemo, fileMeeting, fetchNavFrame, MODE_CONTEXT, type Meeting, type ConnStatus, type NavFrame,
+  connectLive, connectDemo, fileMeeting, fetchNavFrame, fetchContext, MODE_CONTEXT, type Meeting, type ConnStatus, type NavFrame, type Constellation,
 } from "./backend";
 
 // Persisted UI config — survives reloads / new sessions (localStorage).
@@ -30,6 +30,17 @@ const GREETING_CHAT: Message = { id: 0, role: "agent", text: "Hi — I'm followi
 const GREETING_PI: Message = { id: 0, role: "agent", text: "● **PI session ready** — read · bash · edit · write tools loaded. Message me, or tap a Command suggestion and it runs right here." };
 
 type Line = { speaker: string; text: string; isFinal: boolean; id: string };
+
+function restoredConstellation(): Constellation | null {
+  const c = SESSION.constellation;
+  if (!c || typeof c !== "object" || typeof c.bundle !== "string" || !Array.isArray(c.sources) || typeof c.counterpart !== "string" || typeof c.topic !== "string") return null;
+  return {
+    bundle: c.bundle,
+    sources: c.sources.filter((s: any) => s && typeof s.kind === "string" && typeof s.label === "string" && typeof s.n === "number"),
+    counterpart: c.counterpart,
+    topic: c.topic,
+  };
+}
 
 function useStickToBottom() {
   const ref = useRef<HTMLDivElement>(null);
@@ -64,6 +75,11 @@ export default function App() {
   const [proposing, setProposing] = useState(false);
   const [customContext, setCustomContext] = useState<string>(SAVED.customContext ?? "");
   const [goal, setGoal] = useState<string>(SAVED.goal ?? "");
+  const [constellation, setConstellation] = useState<Constellation | null>(restoredConstellation);
+  const [assembling, setAssembling] = useState(false);
+  const [constellationError, setConstellationError] = useState("");
+  const [counterpartInput, setCounterpartInput] = useState(() => restoredConstellation()?.counterpart ?? "");
+  const [topicInput, setTopicInput] = useState(() => restoredConstellation()?.topic ?? "");
   const [rate, setRate] = useState<string>(SAVED.rate ?? "12s");
   const [pasteId, setPasteId] = useState("");
   const [chatInput, setChatInput] = useState("");
@@ -100,7 +116,7 @@ export default function App() {
   const answerSeqRef = useRef(0);
   const lastNavRef = useRef(0); const navSeqRef = useRef(0);
   const liveAnswerRef = useRef(""); const sidRef = useRef(1);
-  const sessionSnapRef = useRef({ lines: [] as Line[], suggestions: [] as Suggestion[], messages: [] as Message[], piMessages: [] as Message[], selectedMeeting: null as Meeting | null, navFrame: null as NavFrame | null });
+  const sessionSnapRef = useRef({ lines: [] as Line[], suggestions: [] as Suggestion[], messages: [] as Message[], piMessages: [] as Message[], selectedMeeting: null as Meeting | null, navFrame: null as NavFrame | null, constellation: null as Constellation | null });
   // Stable PI session id — reused across reloads so PI keeps conversation context.
   const piSessionRef = useRef<string>(SAVED.piSession || ("fl-" + Math.random().toString(36).slice(2, 10)));
 
@@ -110,13 +126,13 @@ export default function App() {
   }, [view, mode, model, flags, rate, questionMode, customContext, goal]);
 
   useEffect(() => {
-    const snapshot = { lines: lines.slice(-500), suggestions: suggestions.slice(0, 40), messages, piMessages, selectedMeeting, navFrame };
+    const snapshot = { lines: lines.slice(-500), suggestions: suggestions.slice(0, 40), messages, piMessages, selectedMeeting, navFrame, constellation };
     sessionSnapRef.current = snapshot;
     const id = window.setTimeout(() => {
       try { localStorage.setItem("fl-session", JSON.stringify(snapshot)); } catch { /* storage unavailable */ }
     }, 1000);
     return () => window.clearTimeout(id);
-  }, [lines, suggestions, messages, piMessages, selectedMeeting, navFrame]);
+  }, [lines, suggestions, messages, piMessages, selectedMeeting, navFrame, constellation]);
   useEffect(() => {
     const flushSession = () => { try { localStorage.setItem("fl-session", JSON.stringify(sessionSnapRef.current)); } catch { /* storage unavailable */ } };
     window.addEventListener("pagehide", flushSession);
@@ -127,7 +143,8 @@ export default function App() {
   const modeCtx = MODE_CONTEXT[mode] ?? suggested.find(s => s.id === mode)?.context ?? "";
   const goalBlock = goal.trim() ? `\nROBIN'S GOAL FOR THIS CONVERSATION: ${goal.trim()}\nNavigate toward this goal. Respect any red lines it states. Prefer moves that advance it.` : "";
   const situationBlock = navFrame ? `\nSITUATION: phase=${navFrame.phase}; counterpart=${navFrame.stance}; next_move=${navFrame.next_move}` : "";
-  const agentContext = [modeCtx, customContext.trim()].filter(Boolean).join(" ") + goalBlock + situationBlock;
+  const bundleBlock = constellation ? `\nBACKGROUND (from Robin's own resources — ground your guidance in this):\n${constellation.bundle.slice(0, 6000)}` : "";
+  const agentContext = [modeCtx, customContext.trim()].filter(Boolean).join(" ") + goalBlock + situationBlock + bundleBlock;
 
   const setStatusMapped = (s: ConnStatus) => setStatus(s === "connected" ? "connected" : s === "connecting" ? "connecting" : "idle");
 
@@ -224,13 +241,13 @@ export default function App() {
     const seq = ++navSeqRef.current;
     setNavBusy(true);
     try {
-      const frame = await fetchNavFrame(ctx, orKey, goal.trim(), "", model);
+      const frame = await fetchNavFrame(ctx, orKey, goal.trim(), constellation?.bundle.slice(0, 2000) ?? "", model);
       if (seq !== navSeqRef.current) return;
       if (frame) setNavFrame(frame);
       setNavBusy(false);
     } catch { if (seq === navSeqRef.current) setNavBusy(false); }
   };
-  useEffect(() => { runNav(); }, [lines, orKey, model, goal]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { runNav(); }, [lines, orKey, model, goal, constellation]); // eslint-disable-line react-hooks/exhaustive-deps
   const refreshNav = () => { lastNavRef.current = 0; runNav(); };
 
   // ── transcript ingest ────────────────────────────────────────────
@@ -251,7 +268,6 @@ export default function App() {
     const meeting = m ?? selectedMeeting;
     if (m) setSelectedMeeting(m);
     setLines([]); setSuggestions([]); setLiveAnswer(""); setNavFrame(null); navSeqRef.current++; setNavBusy(false); lastNavRef.current = 0; liveAnswerRef.current = ""; lastSpeakerRef.current = ""; lineCounter.current = 0;
-    try { localStorage.removeItem("fl-session"); } catch { /* storage unavailable */ }
     connRef.current = (ffKey && meeting) ? connectLive(onTranscriptLine, setStatusMapped, ffKey, meeting.id) : connectDemo(onTranscriptLine, setStatusMapped);
     connRef.current.connect();
     setMeetingsOpen(false);
@@ -282,6 +298,23 @@ export default function App() {
     setProposing(true);
     try { const ms = await proposeModes(getCtx(), orKey, model); if (ms.length) setSuggested(ms.map((m, i) => ({ id: `p${i}-${m.label}`, l: m.label, context: m.context }))); } catch {}
     setProposing(false);
+  };
+  const assembleConstellation = async () => {
+    setAssembling(true); setConstellationError("");
+    try {
+      const r = await fetchContext(goal.trim(), counterpartInput.trim(), topicInput.trim(), bridgeToken);
+      if (r.ok && typeof r.bundle === "string") {
+        const sources = Array.isArray(r.sources) ? r.sources.filter(s => s && typeof s.kind === "string" && typeof s.label === "string" && typeof s.n === "number") : [];
+        setConstellation({ bundle: r.bundle, sources, counterpart: counterpartInput.trim(), topic: topicInput.trim() });
+      } else {
+        setConstellationError(r.error || "Could not assemble constellation.");
+        setTimeout(() => setConstellationError(""), 4000);
+      }
+    } catch {
+      setConstellationError("bridge offline");
+      setTimeout(() => setConstellationError(""), 4000);
+    }
+    setAssembling(false);
   };
 
   // ── Chat (OpenRouter, meeting-aware) ─────────────────────────────
@@ -341,6 +374,7 @@ export default function App() {
       `\n## Live Feed\n${liveFeed}`,
       liveAnswer ? `\n## Question Mode Draft\n${liveAnswer}` : "",
       navFrame ? `\n## Navigator\nPhase: ${navFrame.phase} · Stance: ${navFrame.stance} · Progress: ${navFrame.goal_progress} · Next move: ${navFrame.next_move} · Risk: ${navFrame.risk}` : "",
+      constellation ? `\n## Constellation\n${constellation.sources.map(s => `${s.label}: ${s.n}`).join(" · ")}` : "",
       `\n## Full Chat\n${chat}`,
       `\n## PI Command Log\n\`\`\`text\n${piLog.replace(/```/g, "'''")}\n\`\`\``,
     ];
@@ -394,6 +428,14 @@ export default function App() {
     "--ac": C.ac, "--ac-hover": C.hover, "--ac-tint": C.tint, "--ac-tint2": C.tint2, "--ac-border": C.border, "--ac-text": C.text,
     minHeight: "100vh", width: "100%", padding: 28, background: `radial-gradient(1200px 600px at 78% -8%, ${C.tint}, transparent 60%), oklch(0.975 0.006 250)`, overflow: "auto",
   } as CSSProperties;
+  const constellationChips = (compact = false) => constellation && (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+      {constellation.sources.map(source => {
+        const emoji: Record<string, string> = { people: "🧑", meetings: "📜", wiki: "📚", notion: "🧠", client: "📁" };
+        return <span key={`${source.kind}-${source.label}`} style={{ ...filterChip(false), cursor: "default", padding: compact ? "4px 10px" : undefined, fontSize: compact ? 11.5 : undefined }}>{emoji[source.kind] || "✨"} {source.label} {source.n}</span>;
+      })}
+    </div>
+  );
 
   // ── Chat thread + composer (reusable; called inline so inputs keep focus) ──
   const renderThread = (msgs: Message[], busy: boolean) => (
@@ -662,6 +704,7 @@ export default function App() {
           </div>
           <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ac-text)", whiteSpace: "nowrap", flex: "0 0 auto" }}>Configure</span>
         </button>
+        {constellationChips(true)}
         <div style={{ display: "flex", gap: 5, padding: 5, background: "oklch(0.97 0.005 250)", border: "1px solid oklch(0.92 0.006 255)", borderRadius: 13 }}>
           {TABS.map(t => <button key={t.id} onClick={() => setTab(t.id as any)} style={tabBtn(tab === t.id)}><Icon id={t.ic} size={15} />{t.l}</button>)}
         </div>
@@ -704,6 +747,20 @@ export default function App() {
             <div style={{ fontSize: 15, fontWeight: 700, color: "oklch(0.27 0.025 255)", marginBottom: 6 }}>Goal for this conversation</div>
             <div style={{ fontSize: 13, color: "oklch(0.58 0.015 255)", marginBottom: 16, lineHeight: 1.5 }}>What do you want out of this call? Objective, red lines, desired next step — the copilot navigates toward it.</div>
             <textarea value={goal} onChange={e => setGoal(e.target.value)} placeholder="e.g. “Renewal with Bianca — get commitment to 3 smoke tests, don't go below X, leave with a concrete date.”" className="fl-focus" style={{ width: "100%", minHeight: 100, resize: "vertical", padding: "14px 16px", border: `1px solid ${BORDER}`, borderRadius: 12, fontFamily: "inherit", fontSize: 13.5, lineHeight: 1.6, color: "oklch(0.3 0.02 255)", outline: "none" }} />
+            <div style={{ marginTop: 20, paddingTop: 18, borderTop: "1px solid oklch(0.93 0.006 255)" }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: "oklch(0.27 0.025 255)", marginBottom: 12 }}>Constellation</div>
+              <div style={{ display: "flex", gap: 10 }}>
+                <input value={counterpartInput} onChange={e => setCounterpartInput(e.target.value)} placeholder="Who are you talking to? e.g. Bianca / Mingle" className="fl-focus" style={{ flex: "1 1 0", minWidth: 0, padding: "11px 14px", border: `1px solid ${BORDER}`, borderRadius: 11, fontFamily: "inherit", fontSize: 12.5, color: "oklch(0.3 0.02 255)", outline: "none" }} />
+                <input value={topicInput} onChange={e => setTopicInput(e.target.value)} placeholder="Topic override (defaults to goal)" className="fl-focus" style={{ flex: "1 1 0", minWidth: 0, padding: "11px 14px", border: `1px solid ${BORDER}`, borderRadius: 11, fontFamily: "inherit", fontSize: 12.5, color: "oklch(0.3 0.02 255)", outline: "none" }} />
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 12 }}>
+                <button onClick={assembleConstellation} disabled={assembling || !bridgeOnline || (!goal.trim() && !counterpartInput.trim() && !topicInput.trim())} style={{ display: "inline-flex", alignItems: "center", gap: 9, padding: "11px 16px", background: "var(--ac-tint)", border: "1px solid var(--ac-border)", borderRadius: 11, color: "var(--ac-text)", fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", opacity: assembling || !bridgeOnline || (!goal.trim() && !counterpartInput.trim() && !topicInput.trim()) ? 0.55 : 1 }}>✨ {assembling ? "Assembling…" : "Assemble constellation"}</button>
+                {constellation && <button onClick={() => setConstellation(null)} style={{ padding: 0, background: "none", border: "none", color: "oklch(0.5 0.02 255)", fontFamily: "inherit", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>Clear</button>}
+              </div>
+              {constellationError && <div style={{ marginTop: 10, fontSize: 12, color: "oklch(0.55 0.16 25)" }}>{constellationError}</div>}
+              {!bridgeOnline && <div style={{ marginTop: 10, fontSize: 12, color: "oklch(0.6 0.015 255)" }}>Constellation needs the local bridge (dev server).</div>}
+              {constellation && <div style={{ marginTop: 12 }}>{constellationChips()}</div>}
+            </div>
           </div>
           <div style={{ height: 1, background: "oklch(0.93 0.006 255)" }} />
           <div>

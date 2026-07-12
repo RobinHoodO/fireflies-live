@@ -12,7 +12,7 @@
 
 import http from "node:http";
 import { spawn } from "node:child_process";
-import { appendFile, writeFile } from "node:fs/promises";
+import { appendFile, writeFile, readFile, readdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 
@@ -22,6 +22,9 @@ const AUDIT = path.resolve(process.cwd(), "server", "audit.log");
 const MAX_OUTPUT = 200_000; // bytes per run, then truncate
 const MAX_MS = 120_000;     // hard timeout per command
 const FILE_DIR = "/Users/robinsverd/Thrivbe-AI/content/meetings/transcripts";
+const SEM = "http://127.0.0.1:3015/search";
+const CONTENT_ROOT = "/Users/robinsverd/Thrivbe-AI/content";
+const CLIENTS_ROOT = "/Users/robinsverd/Thrivbe-AI/clients";
 
 // Catastrophic patterns we refuse outright. Not a security boundary against a
 // determined operator (it's their machine) — a guard against fat-finger disasters.
@@ -42,6 +45,30 @@ function denied(cmd) {
 function send(res, obj) {
   res.write(JSON.stringify(obj) + "\n");
 }
+
+async function semsearch(query, k, corpus) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 6000);
+  try {
+    const response = await fetch(SEM, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query, k, corpus }),
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`semsearch ${response.status}`);
+    const data = await response.json();
+    return Array.isArray(data?.results) ? data.results : [];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const scored = (rows) => rows.filter((row) => typeof row?.score === "number" && row.score >= 0.35);
+const rootedPath = (root, target) => {
+  const resolved = path.resolve(root, target);
+  return resolved.startsWith(`${root}/`) ? resolved : "";
+};
 
 // Per-session shared secret, injected by the Vite bridge plugin. Fail closed if absent.
 const TOKEN = process.env.BRIDGE_TOKEN || "";
@@ -164,6 +191,129 @@ const server = http.createServer((req, res) => {
       send(res, { type: "start", cmd: "pi" });
       // No shell: args are passed as argv, so the message can never break out to the shell.
       streamChild(res, spawn("pi", ["--print", "--offline", "--session-id", sessionId, message], { env: piEnv(), stdio: ["ignore", "pipe", "pipe"] }));
+    });
+    return;
+  }
+
+  // Assemble a compact, on-demand context bundle from Robin's local corpora.
+  // Body: { goal?, counterpart?, topic? }.
+  if (req.method === "POST" && req.url === "/context") {
+    if (!TOKEN || req.headers.authorization !== `Bearer ${TOKEN}`) {
+      res.writeHead(401, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: "unauthorized" })); return;
+    }
+    if (!String(req.headers["content-type"] || "").includes("application/json")) {
+      res.writeHead(415, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: "json only" })); return;
+    }
+    let body = "", bytes = 0;
+    req.on("data", (c) => { body += c; bytes += c.length; if (bytes > 20_000) req.destroy(); });
+    req.on("end", async () => {
+      let goal = "", counterpart = "", topic = "";
+      try {
+        const j = JSON.parse(body);
+        goal = typeof j.goal === "string" ? j.goal.trim() : "";
+        counterpart = typeof j.counterpart === "string" ? j.counterpart.trim() : "";
+        topic = typeof j.topic === "string" ? j.topic.trim() : "";
+      } catch { /* invalid JSON is an empty request */ }
+      if (!goal && !counterpart && !topic) {
+        res.writeHead(400, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: "empty request" })); return;
+      }
+
+      const searches = [];
+      if (counterpart) searches.push(["people", semsearch(counterpart, 3, "people")]);
+      const meetingQuery = [counterpart, topic || goal].filter(Boolean).join(" ");
+      if (meetingQuery) searches.push(["meetings", semsearch(meetingQuery, 6, "meetings")]);
+      const topicQuery = topic || goal;
+      if (topicQuery) {
+        searches.push(["wiki", semsearch(topicQuery, 6, "wiki_skills")]);
+        searches.push(["notion", semsearch(topicQuery, 4, "notion")]);
+      }
+      const settled = await Promise.allSettled(searches.map(([, search]) => search));
+      const hits = {};
+      settled.forEach((result, i) => { if (result.status === "fulfilled") hits[searches[i][0]] = scored(result.value); });
+
+      const meetingPaths = [];
+      const seenPaths = new Set();
+      for (const hit of hits.meetings || []) {
+        if (typeof hit.path !== "string" || seenPaths.has(hit.path)) continue;
+        seenPaths.add(hit.path);
+        meetingPaths.push(hit.path);
+        if (meetingPaths.length >= 2) break;
+      }
+      const meetingFiles = [];
+      for (const hitPath of meetingPaths) {
+        const fullPath = rootedPath(CONTENT_ROOT, hitPath);
+        if (!fullPath) continue;
+        try {
+          const content = await readFile(fullPath, "utf8");
+          meetingFiles.push({ path: hitPath, excerpt: content.length > 2500 ? `${content.slice(0, 2500)}\n…[truncated]` : content });
+        } catch { /* stale or unreadable search hit */ }
+      }
+
+      let client = null;
+      if (counterpart) {
+        try {
+          const words = counterpart.toLowerCase().match(/[\p{L}\p{N}]+/gu)?.filter((word) => word.length > 3) || [];
+          const folders = await readdir(CLIENTS_ROOT, { withFileTypes: true });
+          const folder = folders.find((entry) => entry.isDirectory() && words.some((word) => entry.name.toLowerCase().includes(word)));
+          if (folder) {
+            const dirPath = rootedPath(CLIENTS_ROOT, folder.name);
+            if (dirPath) {
+              const entries = await readdir(dirPath, { withFileTypes: true });
+              const names = entries.slice(0, 15).map((entry) => entry.name);
+              const markdown = entries.find((entry) => entry.isFile() && entry.name.endsWith(".md"));
+              let excerpt = "";
+              if (markdown) {
+                const markdownPath = rootedPath(CLIENTS_ROOT, path.join(folder.name, markdown.name));
+                if (markdownPath) {
+                  try {
+                    const content = await readFile(markdownPath, "utf8");
+                    excerpt = content.length > 1500 ? `${content.slice(0, 1500)}\n…[truncated]` : content;
+                  } catch { /* optional client note */ }
+                }
+              }
+              client = { dirname: folder.name, names, excerpt };
+            }
+          }
+        } catch { /* client corpus is optional */ }
+      }
+
+      const sections = [];
+      const sourceFor = [];
+      const people = hits.people || [];
+      if (people.length) {
+        sections.push(`## 🧑 People\n${people.map((hit) => `- ${hit.name || "Unknown"} — ${hit.headline || ""} · ${hit.company || ""} · ${hit.location || ""} (score ${hit.score.toFixed(2)})`).join("\n")}`);
+        sourceFor.push({ kind: "people", label: "network", n: people.length });
+      }
+      if (meetingFiles.length) {
+        sections.push(`## 📜 Meeting history\n${meetingFiles.map((file) => `### ${file.path}\n${file.excerpt}`).join("\n\n")}`);
+        sourceFor.push({ kind: "meetings", label: "meetings", n: meetingFiles.length });
+      }
+      const wiki = (hits.wiki || []).filter((hit) => typeof hit.title === "string" && hit.title);
+      if (wiki.length) {
+        sections.push(`## 📚 Playbook signals\n${wiki.map((hit) => `- ${hit.title}`).join("\n")}`);
+        sourceFor.push({ kind: "wiki", label: "playbooks", n: wiki.length });
+      }
+      const notion = (hits.notion || []).filter((hit) => typeof hit.title === "string" && hit.title);
+      if (notion.length) {
+        sections.push(`## 🧠 Knowledge base\n${notion.map((hit) => `- ${hit.title}`).join("\n")}`);
+        sourceFor.push({ kind: "notion", label: "knowledge", n: notion.length });
+      }
+      if (client) {
+        sections.push(`## 📁 Client folder\n${client.dirname}: ${client.names.join(", ")}${client.excerpt ? `\n\n${client.excerpt}` : ""}`);
+        sourceFor.push({ kind: "client", label: "client folder", n: 1 });
+      }
+
+      let bundle = "";
+      const sources = [];
+      for (let i = 0; i < sections.length; i++) {
+        const next = bundle ? `${bundle}\n\n${sections[i]}` : sections[i];
+        if (next.length > 8000) break;
+        bundle = next;
+        sources.push(sourceFor[i]);
+      }
+      await appendFile(AUDIT, `${new Date().toISOString()} CTX ${counterpart || "-"} | ${(topic || goal || "").slice(0, 60)} | sources=${sources.map((source) => `${source.kind}:${source.n}`).join(",")}\n`).catch(() => {});
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(sources.length ? { ok: true, bundle, sources } : { ok: false, error: "no sources reachable or no matches" }));
     });
     return;
   }

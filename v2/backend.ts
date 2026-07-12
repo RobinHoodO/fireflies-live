@@ -7,6 +7,8 @@ export type ConnStatus = "disconnected" | "connecting" | "connected" | "error";
 export type SugType = "ask" | "do" | "note" | "command";
 export interface BackendSuggestion { id: number; type: SugType; text: string; t: number }
 export interface NavFrame { phase: string; stance: string; goal_progress: string; next_move: string; risk: string }
+export interface ConstellationSource { kind: string; label: string; n: number }
+export interface Constellation { bundle: string; sources: ConstellationSource[]; counterpart: string; topic: string }
 
 export interface Meeting { id: string; title: string; sub: string; time: string; active: boolean }
 
@@ -38,6 +40,19 @@ export async function fileMeeting(title: string, markdown: string, bridgeToken: 
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${bridgeToken}` },
       body: JSON.stringify({ title, markdown }),
+    });
+    return await r.json();
+  } catch {
+    return { ok: false, error: "bridge offline" };
+  }
+}
+
+export async function fetchContext(goal: string, counterpart: string, topic: string, bridgeToken: string): Promise<{ ok: boolean; bundle?: string; sources?: ConstellationSource[]; error?: string }> {
+  try {
+    const r = await fetch("/bridge/context", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${bridgeToken}` },
+      body: JSON.stringify({ goal, counterpart, topic }),
     });
     return await r.json();
   } catch {
