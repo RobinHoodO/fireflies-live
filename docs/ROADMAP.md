@@ -17,6 +17,7 @@ backend. Light, spacious, futuristic UI.
 | 🧩 **4** | Chrome extension form factor | ⬜ planned |
 | 🧠 **5** | Intelligence & polish | ⬜ later |
 | 🌐 **6** | Thrivbe OS integration | 🟡 **6.1 End & File shipped 2026-07-12** |
+| 🧭 **7** | Adaptive Navigator | 🟡 in build — design: [`ADAPTIVE-NAVIGATOR.md`](./ADAPTIVE-NAVIGATOR.md) |
 
 ```
 before 📅 ──────── during 🔴 LIVE ──────── after 📝
@@ -122,6 +123,30 @@ Twenty after). Weave, in order of leverage:
   (today keys come from a Vite dev middleware reading `~/Thrivbe-AI/.env` — Mac dev only).
 - 💯 100x framing: live copilot on Robin's own calls = Client Zero's most demoable
   "AI employee" artifact → labs entry + AI-Factory story.
+
+## 🧭 Phase 7 — Adaptive Navigator (🟡 in build)
+
+> From *transcriber with tips* → **goal-conditioned conversation navigator**: knows
+> Robin's 🎯 goal, tracks 🧭 where the conversation is, pulls 🌌 his own resources into
+> the moment, and guides what to say / how to say it / how to act — live.
+> Full design: [`ADAPTIVE-NAVIGATOR.md`](./ADAPTIVE-NAVIGATOR.md)
+
+```
+🎯 goal card ──▶ 🌌 constellation ──▶ 🧭 navigator loop (~45s) ──▶ ⚡ fast loop (8–12s)
+   (once)         (on demand)           situation frame              goal-directed
+                  semsearch :3015       phase·stance·next move       suggestions/chat
+```
+
+- ⬜ 🎯 **7.1 Goal card** — free-text intent at connect (objective, red lines, desired
+  outcome); every prompt (suggestions, "Say this", chat, navigator) goal-conditioned.
+- ⬜ 🧭 **7.2 Navigator strip** — 45s pulse → situation frame `{phase, stance,
+  goal_progress, next_move, risk}` shown as a pinned strip + injected downstream.
+- ⬜ 🌌 **7.3 Constellation** — bridge `POST /context` fans out over turbovec corpora
+  (📜 meetings 125 · 📚 wiki_skills 10.5K · 🧠 notion 34K · 🧑 people 2K) + local
+  meeting analyses + `clients/` folders → compact bundle + source chips; adaptive,
+  not a template — assembled from Robin's request.
+- ⬜ 🏢 **7.4 Kernel-native** — retrieval + guidance via Thrivbe-1 kernel (private
+  routing, full wiki text, Twenty/Notion enrichment). Merges with 6.2/6.3.
 
 ---
 
