@@ -12,7 +12,7 @@
 
 import http from "node:http";
 import { spawn } from "node:child_process";
-import { appendFile, writeFile, readFile, readdir } from "node:fs/promises";
+import { appendFile, writeFile, readFile, readdir, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 
@@ -244,6 +244,8 @@ const server = http.createServer((req, res) => {
         const fullPath = rootedPath(CONTENT_ROOT, hitPath);
         if (!fullPath) continue;
         try {
+          const st = await stat(fullPath);
+          if (st.size > 2_000_000) continue;
           const content = await readFile(fullPath, "utf8");
           meetingFiles.push({ path: hitPath, excerpt: content.length > 2500 ? `${content.slice(0, 2500)}\n…[truncated]` : content });
         } catch { /* stale or unreadable search hit */ }
@@ -266,8 +268,11 @@ const server = http.createServer((req, res) => {
                 const markdownPath = rootedPath(CLIENTS_ROOT, path.join(folder.name, markdown.name));
                 if (markdownPath) {
                   try {
-                    const content = await readFile(markdownPath, "utf8");
-                    excerpt = content.length > 1500 ? `${content.slice(0, 1500)}\n…[truncated]` : content;
+                    const st = await stat(markdownPath);
+                    if (st.size <= 2_000_000) {
+                      const content = await readFile(markdownPath, "utf8");
+                      excerpt = content.length > 1500 ? `${content.slice(0, 1500)}\n…[truncated]` : content;
+                    }
                   } catch { /* optional client note */ }
                 }
               }

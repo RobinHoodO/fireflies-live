@@ -7,7 +7,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProp
 import { Icon, IconSprite } from "./icons";
 import { mdToHtml } from "./md";
 import {
-  C, MODES, MODELS, MODEL_IDS, FLAGS, VIEWS, TABS, FILTERS, SUGMETA,
+  C, MODES, MODELS, MODEL_IDS, FAST_MODELS, FLAGS, VIEWS, TABS, FILTERS, SUGMETA,
   RATES, EMPTY_STEPS,
   segBtn, tabBtn, modeChip, filterChip, countBadge, modelRow, track, knob, qBtnStyle, rel,
   type Suggestion, type Message,
@@ -70,6 +70,7 @@ export default function App() {
   const [feedExpanded, setFeedExpanded] = useState(false);
   const [mode, setMode] = useState<string>(SAVED.mode ?? "");
   const [model, setModel] = useState<string>(() => MODEL_IDS.includes(SAVED.model) ? SAVED.model : "anthropic/claude-sonnet-5");
+  const [fastModel, setFastModel] = useState<string>(() => FAST_MODELS.some(m => m.id === SAVED.fastModel) ? SAVED.fastModel : "anthropic/claude-haiku-4.5");
   const [flags, setFlags] = useState<Record<string, boolean>>(SAVED.flags ?? { autosuggest: true, sentiment: true, actions: true, summary: false, speakers: true, profanity: false });
   const [suggested, setSuggested] = useState<{ id: string; l: string; context: string }[]>([]);
   const [proposing, setProposing] = useState(false);
@@ -87,7 +88,11 @@ export default function App() {
   const [piInput, setPiInput] = useState("");
   const [piThinking, setPiThinking] = useState(false);
   const [, force] = useState(0);
-  const [suggestions, setSuggestions] = useState<Suggestion[]>(() => Array.isArray(SESSION.suggestions) ? SESSION.suggestions.filter((s: any) => s && typeof s.text === "string" && typeof s.type === "string").slice(0, 40) : []);
+  const [suggestions, setSuggestions] = useState<Suggestion[]>(() => Array.isArray(SESSION.suggestions) ? SESSION.suggestions
+    .filter((s: any) => s && typeof s.id === "number" && typeof s.text === "string" && typeof s.type === "string" && typeof s.t === "number" && (s.status === undefined || s.status === "done"))
+    .slice(0, 40)
+    .map((s: any) => ({ id: s.id, type: s.type, text: s.text, t: s.t, ...(s.status === "done" ? { status: "done" as const } : {}), ...(s.outcome !== undefined ? { outcome: String(s.outcome) } : {}) }))
+    : []);
   const [messages, setMessages] = useState<Message[]>(() => { const saved = Array.isArray(SESSION.messages) ? SESSION.messages.filter((m: any) => m && typeof m.text === "string" && (m.role === "user" || m.role === "agent")) : []; return saved.length > 1 ? saved : [GREETING_CHAT]; });
   const [piMessages, setPiMessages] = useState<Message[]>(() => { const saved = Array.isArray(SESSION.piMessages) ? SESSION.piMessages.filter((m: any) => m && typeof m.text === "string" && (m.role === "user" || m.role === "agent")) : []; return saved.length > 1 ? saved : [GREETING_PI]; });
 
@@ -115,6 +120,7 @@ export default function App() {
   const suggestionsRef = useRef<Suggestion[]>([]); suggestionsRef.current = suggestions;
   const answerSeqRef = useRef(0);
   const lastNavRef = useRef(0); const navSeqRef = useRef(0);
+  const constellationErrRef = useRef<number | undefined>(undefined);
   const liveAnswerRef = useRef(""); const sidRef = useRef(1);
   const sessionSnapRef = useRef({ lines: [] as Line[], suggestions: [] as Suggestion[], messages: [] as Message[], piMessages: [] as Message[], selectedMeeting: null as Meeting | null, navFrame: null as NavFrame | null, constellation: null as Constellation | null });
   // Stable PI session id — reused across reloads so PI keeps conversation context.
@@ -122,8 +128,8 @@ export default function App() {
 
   // Persist config so it's consistent across sessions.
   useEffect(() => {
-    try { localStorage.setItem("fl-config", JSON.stringify({ view, mode, model, flags, rate, questionMode, customContext, goal, piSession: piSessionRef.current })); } catch { /* storage unavailable */ }
-  }, [view, mode, model, flags, rate, questionMode, customContext, goal]);
+    try { localStorage.setItem("fl-config", JSON.stringify({ view, mode, model, fastModel, flags, rate, questionMode, customContext, goal, piSession: piSessionRef.current })); } catch { /* storage unavailable */ }
+  }, [view, mode, model, fastModel, flags, rate, questionMode, customContext, goal]);
 
   useEffect(() => {
     const snapshot = { lines: lines.slice(-500), suggestions: suggestions.slice(0, 40), messages, piMessages, selectedMeeting, navFrame, constellation };
@@ -143,8 +149,9 @@ export default function App() {
   const modeCtx = MODE_CONTEXT[mode] ?? suggested.find(s => s.id === mode)?.context ?? "";
   const goalBlock = goal.trim() ? `\nROBIN'S GOAL FOR THIS CONVERSATION: ${goal.trim()}\nNavigate toward this goal. Respect any red lines it states. Prefer moves that advance it.` : "";
   const situationBlock = navFrame ? `\nSITUATION: phase=${navFrame.phase}; counterpart=${navFrame.stance}; next_move=${navFrame.next_move}` : "";
-  const bundleBlock = constellation ? `\nBACKGROUND (from Robin's own resources — ground your guidance in this):\n${constellation.bundle.slice(0, 6000)}` : "";
-  const agentContext = [modeCtx, customContext.trim()].filter(Boolean).join(" ") + goalBlock + situationBlock + bundleBlock;
+  const baseContext = [modeCtx, customContext.trim()].filter(Boolean).join(" ");
+  const pulseContext = baseContext + goalBlock + situationBlock + (constellation ? `\nBACKGROUND (Robin's resources):\n${constellation.bundle.slice(0, 1500)}` : "");
+  const chatContext = baseContext + goalBlock + situationBlock + (constellation ? `\nBACKGROUND (from Robin's own resources — ground your guidance in this):\n${constellation.bundle.slice(0, 6000)}` : "");
 
   const setStatusMapped = (s: ConnStatus) => setStatus(s === "connected" ? "connected" : s === "connecting" ? "connecting" : "idle");
 
@@ -189,24 +196,29 @@ export default function App() {
     const now = Date.now();
     if (now - lastSuggestRef.current < rateSecs * 1000) return;
     lastSuggestRef.current = now;
-    const ctx = lines.map(l => `[${l.speaker}]: ${l.text}`).join("\n");
-    const existing = suggestionsRef.current.slice(0, 10).map(s => ({ id: s.id, type: s.type as any, text: s.text }));
-    fetchSuggestions(ctx, orKey, agentContext, model, existing).then(items => {
+    const ctx = lines.slice(-40).map(l => `[${l.speaker}]: ${l.text}`).join("\n");
+    const existing = suggestionsRef.current.slice(0, 10).map(s => ({ id: s.id, type: s.type as any, text: s.text, done: s.status === "done" }));
+    fetchSuggestions(ctx, orKey, pulseContext, fastModel, existing).then(items => {
       if (!items.length) return;
       setSuggestions(prev => {
         const next = [...prev];
         for (const it of items) {
           if (it.id != null) {
             const idx = next.findIndex(s => s.id === it.id);
-            if (idx >= 0) { next[idx] = { ...next[idx], type: it.type, text: it.text, t: Date.now() }; continue; } // refine in place
+            if (idx >= 0) {
+              if (it.status === "done") { next[idx] = { ...next[idx], status: "done", outcome: it.outcome || "", t: Date.now() }; continue; }
+              if (next[idx].status === "done") continue;
+              next[idx] = { ...next[idx], type: it.type, text: it.text, t: Date.now() }; continue;
+            } // refine in place
           }
+          if (it.status === "done") continue;
           if (next.some(s => s.text.toLowerCase() === it.text.toLowerCase())) continue; // skip exact dupe
           next.unshift({ id: sidRef.current++, type: it.type, text: it.text, t: Date.now() }); // genuinely new
         }
         return next.slice(0, 40);
       });
     }).catch(() => {});
-  }, [lines, flags, orKey, agentContext, model, rateSecs, status]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [lines, flags, orKey, pulseContext, fastModel, rateSecs, status]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── question-mode live answer ────────────────────────────────────
   useEffect(() => {
@@ -218,7 +230,7 @@ export default function App() {
     const prev = liveAnswerRef.current;
     const seq = ++answerSeqRef.current;
     setAnswering(true);
-    streamLiveAnswer(ctx, orKey, agentContext, model, partial => {
+    streamLiveAnswer(ctx, orKey, pulseContext, fastModel, partial => {
       if (seq !== answerSeqRef.current) return;
       const p = partial.trim();
       if (p && p !== "—") setLiveAnswer(p); // show it being formulated live
@@ -229,7 +241,7 @@ export default function App() {
       else { setLiveAnswer(f); liveAnswerRef.current = f; }
       setAnswering(false);
     }).catch(() => { if (seq === answerSeqRef.current) setAnswering(false); });
-  }, [lines, questionMode, orKey, agentContext, model]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [lines, questionMode, orKey, pulseContext, fastModel]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── navigator situation frame ───────────────────────────────────
   const runNav = async () => {
@@ -241,13 +253,13 @@ export default function App() {
     const seq = ++navSeqRef.current;
     setNavBusy(true);
     try {
-      const frame = await fetchNavFrame(ctx, orKey, goal.trim(), constellation?.bundle.slice(0, 2000) ?? "", model);
+      const frame = await fetchNavFrame(ctx, orKey, goal.trim(), constellation?.bundle.slice(0, 2000) ?? "", fastModel);
       if (seq !== navSeqRef.current) return;
       if (frame) setNavFrame(frame);
       setNavBusy(false);
     } catch { if (seq === navSeqRef.current) setNavBusy(false); }
   };
-  useEffect(() => { runNav(); }, [lines, orKey, model, goal, constellation]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { runNav(); }, [lines, orKey, fastModel, goal, constellation, status]); // eslint-disable-line react-hooks/exhaustive-deps
   const refreshNav = () => { lastNavRef.current = 0; runNav(); };
 
   // ── transcript ingest ────────────────────────────────────────────
@@ -268,6 +280,7 @@ export default function App() {
     const meeting = m ?? selectedMeeting;
     if (m) setSelectedMeeting(m);
     setLines([]); setSuggestions([]); setLiveAnswer(""); setNavFrame(null); navSeqRef.current++; setNavBusy(false); lastNavRef.current = 0; liveAnswerRef.current = ""; lastSpeakerRef.current = ""; lineCounter.current = 0;
+    try { localStorage.removeItem("fl-session"); } catch { /* storage unavailable */ }
     connRef.current = (ffKey && meeting) ? connectLive(onTranscriptLine, setStatusMapped, ffKey, meeting.id) : connectDemo(onTranscriptLine, setStatusMapped);
     connRef.current.connect();
     setMeetingsOpen(false);
@@ -308,11 +321,13 @@ export default function App() {
         setConstellation({ bundle: r.bundle, sources, counterpart: counterpartInput.trim(), topic: topicInput.trim() });
       } else {
         setConstellationError(r.error || "Could not assemble constellation.");
-        setTimeout(() => setConstellationError(""), 4000);
+        if (constellationErrRef.current) window.clearTimeout(constellationErrRef.current);
+        constellationErrRef.current = window.setTimeout(() => setConstellationError(""), 4000);
       }
     } catch {
       setConstellationError("bridge offline");
-      setTimeout(() => setConstellationError(""), 4000);
+      if (constellationErrRef.current) window.clearTimeout(constellationErrRef.current);
+      constellationErrRef.current = window.setTimeout(() => setConstellationError(""), 4000);
     }
     setAssembling(false);
   };
@@ -326,7 +341,7 @@ export default function App() {
     if (!orKey) { setMessages(prev => [...prev, { id: id + 1, role: "agent", text: "AI offline — set OPENROUTER_API." }]); return; }
     setThinking(true);
     try {
-      const resp = await callAI([{ role: "system", content: `You are a meeting assistant. Answer concisely.${agentContext ? ` ${agentContext}` : ""}` }, { role: "user", content: `Transcript:\n${getCtx()}\n\nUser: ${v}` }], orKey, model);
+      const resp = await callAI([{ role: "system", content: `You are a meeting assistant. Answer concisely.${chatContext ? ` ${chatContext}` : ""}` }, { role: "user", content: `Transcript:\n${getCtx()}\n\nUser: ${v}` }], orKey, model);
       setMessages(prev => [...prev, { id: id + 1, role: "agent", text: resp }]);
     } catch { setMessages(prev => [...prev, { id: id + 1, role: "agent", text: "AI unavailable." }]); }
     setThinking(false);
@@ -362,7 +377,7 @@ export default function App() {
   const copyTx = () => { navigator.clipboard.writeText(getCtx()); setCopied(true); setTimeout(() => setCopied(false), 2000); };
   const buildMd = () => {
     const transcript = grouped.map(l => `**${l.speaker}:** ${l.text}`).join("\n\n") || "_No transcript._";
-    const liveFeed = suggestions.map(s => `- **${SUGMETA[s.type]?.kind || s.type}** (${new Date(s.t).toLocaleString()}): ${s.text}`).join("\n") || "_No live feed items._";
+    const liveFeed = suggestions.map(s => `- **${SUGMETA[s.type]?.kind || s.type}** (${new Date(s.t).toLocaleString()}): ${s.text}${s.status === "done" ? ` — ✓ done: ${s.outcome || ""}` : ""}`).join("\n") || "_No live feed items._";
     const chat = messages.map(m => `**${m.role === "user" ? "You" : "AI"}:**\n${m.text}`).join("\n\n") || "_No chat messages._";
     const piLog = piMessages.map(m => `[${m.role === "user" ? "Command" : "PI"}] ${m.text}`).join("\n") || "_No PI command log entries._";
     const sections = [
@@ -655,14 +670,15 @@ export default function App() {
         {!orKey && <div style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 11.5, fontWeight: 600, color: "oklch(0.6 0.015 255)", marginBottom: 14 }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: "oklch(0.78 0.14 75)" }} />AI offline — set OPENROUTER_API</div>}
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {visibleSug.map(s => { const m = SUGMETA[s.type]; return (
-            <button key={s.id} onClick={() => handleSuggestion(s)} disabled={thinking || piThinking} style={{ display: "flex", gap: 14, width: "100%", padding: "16px 18px", background: "#fff", border: "1px solid oklch(0.93 0.006 255)", borderRadius: 14, cursor: "pointer", textAlign: "left", opacity: thinking || piThinking ? 0.6 : 1 }}>
+            <button key={s.id} onClick={() => handleSuggestion(s)} disabled={thinking || piThinking} style={{ display: "flex", gap: 14, width: "100%", padding: "16px 18px", background: "#fff", border: "1px solid oklch(0.93 0.006 255)", borderRadius: 14, cursor: "pointer", textAlign: "left", opacity: thinking || piThinking ? 0.6 : s.status === "done" ? 0.55 : 1 }}>
               <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 34, height: 34, borderRadius: 10, flex: "0 0 auto", background: m.bg }}><Icon id={m.icon} size={17} stroke={m.color} /></span>
               <div style={{ flex: "1 1 auto", minWidth: 0 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5 }}>
-                  <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.03em", textTransform: "uppercase", color: m.color }}>{m.kind}</span>
+                  <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.03em", textTransform: "uppercase", color: s.status === "done" ? "oklch(0.5 0.14 155)" : m.color }}>{s.status === "done" ? "✓ Done" : m.kind}</span>
                   <span style={{ fontSize: 11.5, color: "oklch(0.68 0.012 255)" }}>{rel(s.t)}</span>
                 </div>
                 <div style={{ fontSize: 14, lineHeight: 1.55, color: "oklch(0.32 0.018 255)" }}>{s.text}</div>
+                {s.status === "done" && s.outcome && <div style={{ marginTop: 5, fontSize: 12, lineHeight: 1.5, color: "oklch(0.5 0.14 155)" }}>↳ {s.outcome}</div>}
               </div>
             </button>
           ); })}
@@ -780,8 +796,14 @@ export default function App() {
           </div>
           <div style={{ height: 1, background: "oklch(0.93 0.006 255)" }} />
           <div>
-            <div style={{ fontSize: 15, fontWeight: 700, color: "oklch(0.27 0.025 255)", marginBottom: 6 }}>AI model</div>
-            <div style={{ fontSize: 13, color: "oklch(0.58 0.015 255)", marginBottom: 16, lineHeight: 1.5 }}>Routed through OpenRouter.</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "oklch(0.27 0.025 255)", marginBottom: 6 }}>Live loops (fast + cheap)</div>
+            <div style={{ fontSize: 13, color: "oklch(0.58 0.015 255)", marginBottom: 12, lineHeight: 1.5 }}>Suggestions, Say-this and the navigator run on this model.</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {FAST_MODELS.map(it => <button key={it.id} onClick={() => setFastModel(it.id)} style={modelRow(fastModel === it.id)}><span>{it.l}</span>{fastModel === it.id && <Icon id="i-check" size={17} stroke="var(--ac)" sw={2.4} />}</button>)}
+            </div>
+            <div style={{ height: 1, background: "oklch(0.93 0.006 255)", margin: "22px 0" }} />
+            <div style={{ fontSize: 15, fontWeight: 700, color: "oklch(0.27 0.025 255)", marginBottom: 6 }}>Chat model</div>
+            <div style={{ fontSize: 13, color: "oklch(0.58 0.015 255)", marginBottom: 16, lineHeight: 1.5 }}>Chat & deep answers — routed through OpenRouter.</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
               {MODELS.map(g => (
                 <div key={g.p}>

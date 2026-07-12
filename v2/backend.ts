@@ -114,30 +114,32 @@ No prose.${goal ? ` ROBIN'S GOAL: ${goal}` : ""}${bundleHint ? `\nBACKGROUND:\n$
   } catch { return null; }
 }
 
-// A suggestion to add (id:null) or to refine in place (id = existing suggestion id).
-export interface SuggestionUpdate { id: number | null; type: SugType; text: string }
+// A suggestion to add (id:null), refine in place (id = existing suggestion id), or mark complete.
+export interface SuggestionUpdate { id: number | null; type: SugType; text: string; status?: "done"; outcome?: string }
 
 export async function fetchSuggestions(
   ctx: string, key: string, context: string, model: string,
-  existing: { id: number; type: SugType; text: string }[],
+  existing: { id: number; type: SugType; text: string; done?: boolean }[],
 ): Promise<SuggestionUpdate[]> {
-  const list = existing.slice(0, 10).map(s => ({ id: s.id, type: s.type, text: s.text }));
+  const list = existing.slice(0, 10).map(s => ({ id: s.id, type: s.type, text: s.text, done: !!s.done }));
   const sys = `You are Robin's real-time meeting copilot.${context ? ` Context: ${context}` : ""} You maintain a short live list of suggestions for Robin. Types: "ask" (a sharp question Robin could ask), "do" (a concrete task), "note" (something notable to remember), "command" (an exact shell command to run on Robin's machine — for this type "text" MUST be a single runnable command with no prose).
-Existing suggestions as JSON (each with an "id"): ${JSON.stringify(list)}
+Existing suggestions as JSON (each with an "id"): ${JSON.stringify(list)}. Items marked "done" are already handled.
 Read the latest transcript, then decide changes:
 - If newer context makes an EXISTING suggestion more precise or more actionable, return it with its SAME "id" and improved "text". This UPDATES it in place — never emit a near-duplicate of something that already exists.
+- FOLLOW-THROUGH: compare the latest transcript against the existing suggestions. If Robin has clearly ACTED on one (he said the suggested thing or did the task), return it with its SAME "id", "status":"done" and "outcome":"<how the other side responded / how it landed, under 12 words>". Do not mark items done without transcript evidence.
 - Only create a NEW suggestion ("id": null) for a genuinely new idea not already covered.
 - Do NOT return existing suggestions that are unchanged.
 - Only propose a "command" when running something on Robin's machine is clearly useful and safe.
-Each item: {"id": <existing id or null>, "type": "ask"|"do"|"note"|"command", "text": "<under 14 words; for command, the exact shell command>"}. Respond ONLY with a JSON array (it may be empty). No prose.`;
+Each item: {"id": <existing id or null>, "type": "ask"|"do"|"note"|"command", "text": "<under 14 words; for command, the exact shell command>"}. For a follow-through update, only "id", "status", and "outcome" are required; the app preserves its original text and type. Respond ONLY with a JSON array (it may be empty). No prose.`;
   const raw = await callAI([{ role: "system", content: sys }, { role: "user", content: `Transcript:\n${ctx}` }], key, model);
   try {
     const arr = JSON.parse(raw.slice(raw.indexOf("["), raw.lastIndexOf("]") + 1));
     const valid: SugType[] = ["ask", "do", "note", "command"];
-    return arr.filter((x: any) => x?.text).slice(0, 6).map((x: any) => ({
+    return arr.filter((x: any) => x && (x.text || x.status === "done")).slice(0, 6).map((x: any) => ({
       id: typeof x.id === "number" ? x.id : null,
       type: valid.includes(x.type) ? x.type : (TYPE_MAP[x.type] || "note"),
-      text: String(x.text),
+      text: String(x.text ?? ""),
+      ...(x.status === "done" ? { status: "done" as const, outcome: String(x.outcome ?? "") } : {}),
     }));
   } catch { return []; }
 }

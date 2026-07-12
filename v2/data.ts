@@ -45,6 +45,13 @@ export const MODELS = [
 
 export const MODEL_IDS = MODELS.flatMap(g => g.items.map(i => i.id));
 
+export const FAST_MODELS = [
+  { id: "anthropic/claude-haiku-4.5", l: "Claude Haiku 4.5" },
+  { id: "google/gemini-3.5-flash", l: "Gemini 3.5 Flash" },
+  { id: "deepseek/deepseek-v4-flash", l: "DeepSeek V4 Flash" },
+  { id: "anthropic/claude-sonnet-5", l: "Claude Sonnet 5 (quality)" },
+];
+
 export const FLAGS = [
   { k: "autosuggest", l: "Auto-suggest" }, { k: "sentiment", l: "Sentiment" }, { k: "actions", l: "Action items" },
   { k: "summary", l: "Live summary" }, { k: "speakers", l: "Speaker labels" }, { k: "profanity", l: "Profanity filter" },
@@ -68,7 +75,7 @@ export const SUGMETA: Record<string, { kind: string; icon: string; color: string
 };
 
 // Live data shapes — populated by the backend at runtime (see App.tsx / backend.ts).
-export type Suggestion = { id: number; type: string; text: string; t: number };
+export type Suggestion = { id: number; type: string; text: string; t: number; status?: "done"; outcome?: string };
 export type Message = { id: number; role: "user" | "agent"; text: string };
 export type TermLine = { k: string; t: string };
 
