@@ -14,7 +14,7 @@ import {
 } from "./data";
 import {
   fetchKeys, fetchMeetings, callAI, fetchSuggestions, streamLiveAnswer, streamPI, proposeModes,
-  connectLive, connectDemo, fileMeeting, MODE_CONTEXT, type Meeting, type ConnStatus,
+  connectLive, connectDemo, fileMeeting, fetchNavFrame, MODE_CONTEXT, type Meeting, type ConnStatus, type NavFrame,
 } from "./backend";
 
 // Persisted UI config — survives reloads / new sessions (localStorage).
@@ -63,6 +63,7 @@ export default function App() {
   const [suggested, setSuggested] = useState<{ id: string; l: string; context: string }[]>([]);
   const [proposing, setProposing] = useState(false);
   const [customContext, setCustomContext] = useState<string>(SAVED.customContext ?? "");
+  const [goal, setGoal] = useState<string>(SAVED.goal ?? "");
   const [rate, setRate] = useState<string>(SAVED.rate ?? "12s");
   const [pasteId, setPasteId] = useState("");
   const [chatInput, setChatInput] = useState("");
@@ -85,6 +86,11 @@ export default function App() {
   const [liveAnswer, setLiveAnswer] = useState("");
   const [copied, setCopied] = useState(false);
   const [filed, setFiled] = useState<"idle" | "filing" | "done" | "error">("idle");
+  const [navFrame, setNavFrame] = useState<NavFrame | null>(() => {
+    const n = SESSION.navFrame;
+    return n && typeof n === "object" && ["phase", "stance", "goal_progress", "next_move", "risk"].every(k => typeof n[k] === "string") ? n : null;
+  });
+  const [navBusy, setNavBusy] = useState(false);
 
   const splitElRef = useRef<HTMLDivElement>(null);
   const chatComposerRef = useRef<HTMLTextAreaElement>(null);
@@ -92,24 +98,25 @@ export default function App() {
   const lastSpeakerRef = useRef(""); const lineCounter = useRef(0); const lastSuggestRef = useRef(0); const lastAnswerRef = useRef(0);
   const suggestionsRef = useRef<Suggestion[]>([]); suggestionsRef.current = suggestions;
   const answerSeqRef = useRef(0);
+  const lastNavRef = useRef(0); const navSeqRef = useRef(0);
   const liveAnswerRef = useRef(""); const sidRef = useRef(1);
-  const sessionSnapRef = useRef({ lines: [] as Line[], suggestions: [] as Suggestion[], messages: [] as Message[], piMessages: [] as Message[], selectedMeeting: null as Meeting | null });
+  const sessionSnapRef = useRef({ lines: [] as Line[], suggestions: [] as Suggestion[], messages: [] as Message[], piMessages: [] as Message[], selectedMeeting: null as Meeting | null, navFrame: null as NavFrame | null });
   // Stable PI session id — reused across reloads so PI keeps conversation context.
   const piSessionRef = useRef<string>(SAVED.piSession || ("fl-" + Math.random().toString(36).slice(2, 10)));
 
   // Persist config so it's consistent across sessions.
   useEffect(() => {
-    try { localStorage.setItem("fl-config", JSON.stringify({ view, mode, model, flags, rate, questionMode, customContext, piSession: piSessionRef.current })); } catch { /* storage unavailable */ }
-  }, [view, mode, model, flags, rate, questionMode, customContext]);
+    try { localStorage.setItem("fl-config", JSON.stringify({ view, mode, model, flags, rate, questionMode, customContext, goal, piSession: piSessionRef.current })); } catch { /* storage unavailable */ }
+  }, [view, mode, model, flags, rate, questionMode, customContext, goal]);
 
   useEffect(() => {
-    const snapshot = { lines: lines.slice(-500), suggestions: suggestions.slice(0, 40), messages, piMessages, selectedMeeting };
+    const snapshot = { lines: lines.slice(-500), suggestions: suggestions.slice(0, 40), messages, piMessages, selectedMeeting, navFrame };
     sessionSnapRef.current = snapshot;
     const id = window.setTimeout(() => {
       try { localStorage.setItem("fl-session", JSON.stringify(snapshot)); } catch { /* storage unavailable */ }
     }, 1000);
     return () => window.clearTimeout(id);
-  }, [lines, suggestions, messages, piMessages, selectedMeeting]);
+  }, [lines, suggestions, messages, piMessages, selectedMeeting, navFrame]);
   useEffect(() => {
     const flushSession = () => { try { localStorage.setItem("fl-session", JSON.stringify(sessionSnapRef.current)); } catch { /* storage unavailable */ } };
     window.addEventListener("pagehide", flushSession);
@@ -118,7 +125,9 @@ export default function App() {
 
   // derived context for the AI: selected mode + any custom note
   const modeCtx = MODE_CONTEXT[mode] ?? suggested.find(s => s.id === mode)?.context ?? "";
-  const agentContext = [modeCtx, customContext.trim()].filter(Boolean).join(" ");
+  const goalBlock = goal.trim() ? `\nROBIN'S GOAL FOR THIS CONVERSATION: ${goal.trim()}\nNavigate toward this goal. Respect any red lines it states. Prefer moves that advance it.` : "";
+  const situationBlock = navFrame ? `\nSITUATION: phase=${navFrame.phase}; counterpart=${navFrame.stance}; next_move=${navFrame.next_move}` : "";
+  const agentContext = [modeCtx, customContext.trim()].filter(Boolean).join(" ") + goalBlock + situationBlock;
 
   const setStatusMapped = (s: ConnStatus) => setStatus(s === "connected" ? "connected" : s === "connecting" ? "connecting" : "idle");
 
@@ -205,6 +214,25 @@ export default function App() {
     }).catch(() => { if (seq === answerSeqRef.current) setAnswering(false); });
   }, [lines, questionMode, orKey, agentContext, model]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── navigator situation frame ───────────────────────────────────
+  const runNav = async () => {
+    if (!orKey || lines.length < 4 || status !== "connected") { navSeqRef.current++; setNavBusy(false); return; }
+    const now = Date.now();
+    if (now - lastNavRef.current < 45000) return;
+    lastNavRef.current = now;
+    const ctx = lines.slice(-30).map(l => `[${l.speaker}]: ${l.text}`).join("\n");
+    const seq = ++navSeqRef.current;
+    setNavBusy(true);
+    try {
+      const frame = await fetchNavFrame(ctx, orKey, goal.trim(), "", model);
+      if (seq !== navSeqRef.current) return;
+      if (frame) setNavFrame(frame);
+      setNavBusy(false);
+    } catch { if (seq === navSeqRef.current) setNavBusy(false); }
+  };
+  useEffect(() => { runNav(); }, [lines, orKey, model, goal]); // eslint-disable-line react-hooks/exhaustive-deps
+  const refreshNav = () => { lastNavRef.current = 0; runNav(); };
+
   // ── transcript ingest ────────────────────────────────────────────
   const onTranscriptLine = (speaker: string, text: string, isFinal: boolean, key?: string) => {
     setLines(prev => {
@@ -222,7 +250,7 @@ export default function App() {
     connRef.current?.disconnect();
     const meeting = m ?? selectedMeeting;
     if (m) setSelectedMeeting(m);
-    setLines([]); setSuggestions([]); setLiveAnswer(""); liveAnswerRef.current = ""; lastSpeakerRef.current = ""; lineCounter.current = 0;
+    setLines([]); setSuggestions([]); setLiveAnswer(""); setNavFrame(null); navSeqRef.current++; setNavBusy(false); lastNavRef.current = 0; liveAnswerRef.current = ""; lastSpeakerRef.current = ""; lineCounter.current = 0;
     try { localStorage.removeItem("fl-session"); } catch { /* storage unavailable */ }
     connRef.current = (ffKey && meeting) ? connectLive(onTranscriptLine, setStatusMapped, ffKey, meeting.id) : connectDemo(onTranscriptLine, setStatusMapped);
     connRef.current.connect();
@@ -312,6 +340,7 @@ export default function App() {
       `\n## Transcript\n${transcript}`,
       `\n## Live Feed\n${liveFeed}`,
       liveAnswer ? `\n## Question Mode Draft\n${liveAnswer}` : "",
+      navFrame ? `\n## Navigator\nPhase: ${navFrame.phase} · Stance: ${navFrame.stance} · Progress: ${navFrame.goal_progress} · Next move: ${navFrame.next_move} · Risk: ${navFrame.risk}` : "",
       `\n## Full Chat\n${chat}`,
       `\n## PI Command Log\n\`\`\`text\n${piLog.replace(/```/g, "'''")}\n\`\`\``,
     ];
@@ -482,6 +511,16 @@ export default function App() {
           </div>
         )}
       </div>
+      {navFrame && isConnected && (
+        <div style={{ padding: "10px 28px", borderBottom: "1px solid oklch(0.95 0.005 250)", background: "oklch(0.985 0.004 250)", display: "flex", gap: 14, alignItems: "center", fontSize: 12.5, flexWrap: "wrap" }}>
+          <span style={{ fontWeight: 700, color: "var(--ac-text)" }}>🧭 {navFrame.phase}</span>
+          <span style={{ color: "oklch(0.45 0.02 255)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flexShrink: 1, minWidth: 0 }}>🌡 {navFrame.stance}</span>
+          {goal.trim() && <span style={{ color: "oklch(0.45 0.02 255)" }}>🎯 {navFrame.goal_progress}</span>}
+          <span style={{ fontWeight: 700, color: "oklch(0.3 0.02 255)" }}>▶ {navFrame.next_move}</span>
+          {navFrame.risk && <span style={{ color: "oklch(0.55 0.16 25)" }}>⚠ {navFrame.risk}</span>}
+          <button onClick={refreshNav} title="Refresh navigator" className="fl-hover-soft" style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, border: "none", background: "transparent", color: "oklch(0.45 0.02 255)", cursor: "pointer", opacity: navBusy ? 0.5 : 1 }}><Icon id="i-refresh" size={14} /></button>
+        </div>
+      )}
       <div ref={transcriptScrollRef} onScroll={onTranscriptScroll} className="fl-scroll" style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto" }}>
         {(isConnected || (isIdle && grouped.length > 0)) && (
           <div style={{ padding: "8px 32px 32px" }}>
@@ -618,8 +657,8 @@ export default function App() {
         <button onClick={() => setConfigOpen(true)} className="fl-hover-soft" style={{ display: "flex", alignItems: "center", gap: 14, width: "100%", padding: "16px 18px", background: "oklch(0.98 0.004 250)", border: "1px solid oklch(0.92 0.006 255)", borderRadius: 14, cursor: "pointer", textAlign: "left" }}>
           <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 38, height: 38, borderRadius: 10, background: "#fff", border: "1px solid oklch(0.92 0.006 255)", flex: "0 0 auto" }}><Icon id="i-sliders" size={18} stroke="var(--ac)" /></span>
           <div style={{ flex: "1 1 auto", minWidth: 0 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: "oklch(0.27 0.025 255)" }}>{modeLabel}</div>
-            <div style={{ fontSize: 12.5, color: "oklch(0.6 0.015 255)", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{modelLabel} · {flagsCount} features on</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "oklch(0.27 0.025 255)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{goal.trim() ? `🎯 ${goal}` : modeLabel}</div>
+            <div style={{ fontSize: 12.5, color: "oklch(0.6 0.015 255)", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{goal.trim() ? `${modeLabel} · ` : ""}{modelLabel} · {flagsCount} features on</div>
           </div>
           <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ac-text)", whiteSpace: "nowrap", flex: "0 0 auto" }}>Configure</span>
         </button>
@@ -661,6 +700,12 @@ export default function App() {
           <button onClick={() => setConfigOpen(false)} className="fl-hover-soft" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 36, height: 36, borderRadius: 10, border: "1px solid oklch(0.92 0.006 255)", background: "#fff", color: "oklch(0.45 0.02 255)", cursor: "pointer" }}><Icon id="i-x" size={17} /></button>
         </div>
         <div style={{ padding: 30, display: "flex", flexDirection: "column", gap: 34 }}>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "oklch(0.27 0.025 255)", marginBottom: 6 }}>Goal for this conversation</div>
+            <div style={{ fontSize: 13, color: "oklch(0.58 0.015 255)", marginBottom: 16, lineHeight: 1.5 }}>What do you want out of this call? Objective, red lines, desired next step — the copilot navigates toward it.</div>
+            <textarea value={goal} onChange={e => setGoal(e.target.value)} placeholder="e.g. “Renewal with Bianca — get commitment to 3 smoke tests, don't go below X, leave with a concrete date.”" className="fl-focus" style={{ width: "100%", minHeight: 100, resize: "vertical", padding: "14px 16px", border: `1px solid ${BORDER}`, borderRadius: 12, fontFamily: "inherit", fontSize: 13.5, lineHeight: 1.6, color: "oklch(0.3 0.02 255)", outline: "none" }} />
+          </div>
+          <div style={{ height: 1, background: "oklch(0.93 0.006 255)" }} />
           <div>
             <div style={{ fontSize: 15, fontWeight: 700, color: "oklch(0.27 0.025 255)", marginBottom: 6 }}>Agent mode</div>
             <div style={{ fontSize: 13, color: "oklch(0.58 0.015 255)", marginBottom: 16, lineHeight: 1.5 }}>Sets the assistant's operating context for this call.</div>

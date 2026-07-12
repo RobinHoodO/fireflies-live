@@ -6,6 +6,7 @@
 export type ConnStatus = "disconnected" | "connecting" | "connected" | "error";
 export type SugType = "ask" | "do" | "note" | "command";
 export interface BackendSuggestion { id: number; type: SugType; text: string; t: number }
+export interface NavFrame { phase: string; stance: string; goal_progress: string; next_move: string; risk: string }
 
 export interface Meeting { id: string; title: string; sub: string; time: string; active: boolean }
 
@@ -70,14 +71,32 @@ export async function fetchMeetings(apiKey: string): Promise<{ meetings: Meeting
   }
 }
 
-export async function callAI(messages: { role: string; content: string }[], key: string, model = "anthropic/claude-sonnet-5"): Promise<string> {
+export async function callAI(messages: { role: string; content: string }[], key: string, model = "anthropic/claude-sonnet-5", maxTokens = 400): Promise<string> {
   const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", "HTTP-Referer": "http://localhost:5173", "X-Title": "Fireflies Live" },
-    body: JSON.stringify({ model, messages, max_tokens: 400, temperature: 0.7 }),
+    body: JSON.stringify({ model, messages, max_tokens: maxTokens, temperature: 0.7 }),
   });
   const d = await r.json();
   return d?.choices?.[0]?.message?.content || "Couldn't generate a response.";
+}
+
+export async function fetchNavFrame(ctx: string, key: string, goal: string, bundleHint: string, model: string): Promise<NavFrame | null> {
+  const sys = `You are the navigator for Robin's live conversation. From the transcript, output the current situation as JSON only:
+{"phase":"opening|discovery|pitch|objections|negotiation|closing|smalltalk","stance":"<counterpart's current position/mood, one short line>","goal_progress":"<one short line vs Robin's goal>","next_move":"<the single best next move for Robin, imperative, under 15 words>","risk":"<biggest live risk, or empty string>"}
+No prose.${goal ? ` ROBIN'S GOAL: ${goal}` : ""}${bundleHint ? `\nBACKGROUND:\n${bundleHint}` : ""}`;
+  try {
+    const raw = await callAI([{ role: "system", content: sys }, { role: "user", content: `Transcript (latest last):\n${ctx}` }], key, model, 250);
+    const frame = JSON.parse(raw.slice(raw.indexOf("{"), raw.lastIndexOf("}") + 1));
+    if (!frame || typeof frame !== "object" || Array.isArray(frame)) return null;
+    return {
+      phase: typeof frame.phase === "string" ? frame.phase : "",
+      stance: typeof frame.stance === "string" ? frame.stance : "",
+      goal_progress: typeof frame.goal_progress === "string" ? frame.goal_progress : "",
+      next_move: typeof frame.next_move === "string" ? frame.next_move : "",
+      risk: typeof frame.risk === "string" ? frame.risk : "",
+    };
+  } catch { return null; }
 }
 
 // A suggestion to add (id:null) or to refine in place (id = existing suggestion id).
