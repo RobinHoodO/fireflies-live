@@ -3,11 +3,11 @@
 // The mock data and local handlers are replaced with the real backend: Fireflies
 // meetings + live socket (demo fallback), OpenRouter suggestions/chat/answers, and
 // the localhost command bridge. See ./backend and v2/vite.config.ts.
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type Ref } from "react";
 import { Icon, IconSprite } from "./icons";
 import { mdToHtml } from "./md";
 import {
-  C, MODES, MODELS, FLAGS, VIEWS, TABS, FILTERS, SUGMETA,
+  C, MODES, MODELS, MODEL_IDS, FLAGS, VIEWS, TABS, FILTERS, SUGMETA,
   RATES, EMPTY_STEPS,
   segBtn, tabBtn, modeChip, filterChip, countBadge, modelRow, track, knob, qBtnStyle, rel,
   type Suggestion, type Message,
@@ -19,6 +19,7 @@ import {
 
 // Persisted UI config — survives reloads / new sessions (localStorage).
 const SAVED: any = (() => { try { return JSON.parse(localStorage.getItem("fl-config") || "{}"); } catch { return {}; } })();
+const SESSION: any = (() => { try { const s = JSON.parse(localStorage.getItem("fl-session") || "{}"); return s && typeof s === "object" ? s : {}; } catch { return {}; } })();
 
 const BORDER = "oklch(0.91 0.006 255)";
 const CARD_SHADOW = "0 1px 2px rgba(16,24,40,.04),0 12px 32px -24px rgba(16,24,40,.22)";
@@ -29,6 +30,14 @@ const GREETING_CHAT: Message = { id: 0, role: "agent", text: "Hi — I'm followi
 const GREETING_PI: Message = { id: 0, role: "agent", text: "● **PI session ready** — read · bash · edit · write tools loaded. Message me, or tap a Command suggestion and it runs right here." };
 
 type Line = { speaker: string; text: string; isFinal: boolean; id: string };
+
+function useStickToBottom() {
+  const ref = useRef<HTMLDivElement>(null);
+  const nearBottom = useRef(true);
+  const onScroll = useCallback(() => { const el = ref.current; if (el) nearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight <= 80; }, []);
+  const stick = useCallback(() => { const el = ref.current; if (el && nearBottom.current) el.scrollTop = el.scrollHeight; }, []);
+  return { ref, onScroll, stick };
+}
 
 function speakerColor(name: string) {
   if (name === "You") return C.text;
@@ -49,7 +58,7 @@ export default function App() {
   const [filter, setFilter] = useState("all");
   const [feedExpanded, setFeedExpanded] = useState(false);
   const [mode, setMode] = useState<string>(SAVED.mode ?? "");
-  const [model, setModel] = useState<string>(SAVED.model ?? "anthropic/claude-sonnet-4");
+  const [model, setModel] = useState<string>(() => MODEL_IDS.includes(SAVED.model) ? SAVED.model : "anthropic/claude-sonnet-5");
   const [flags, setFlags] = useState<Record<string, boolean>>(SAVED.flags ?? { autosuggest: true, sentiment: true, actions: true, summary: false, speakers: true, profanity: false });
   const [suggested, setSuggested] = useState<{ id: string; l: string; context: string }[]>([]);
   const [proposing, setProposing] = useState(false);
@@ -61,25 +70,29 @@ export default function App() {
   const [piInput, setPiInput] = useState("");
   const [piThinking, setPiThinking] = useState(false);
   const [, force] = useState(0);
-  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
-  const [messages, setMessages] = useState<Message[]>([GREETING_CHAT]);
-  const [piMessages, setPiMessages] = useState<Message[]>([GREETING_PI]);
+  const [suggestions, setSuggestions] = useState<Suggestion[]>(() => Array.isArray(SESSION.suggestions) ? SESSION.suggestions.filter((s: any) => s && typeof s.text === "string" && typeof s.type === "string").slice(0, 40) : []);
+  const [messages, setMessages] = useState<Message[]>(() => { const saved = Array.isArray(SESSION.messages) ? SESSION.messages.filter((m: any) => m && typeof m.text === "string" && (m.role === "user" || m.role === "agent")) : []; return saved.length > 1 ? saved : [GREETING_CHAT]; });
+  const [piMessages, setPiMessages] = useState<Message[]>(() => { const saved = Array.isArray(SESSION.piMessages) ? SESSION.piMessages.filter((m: any) => m && typeof m.text === "string" && (m.role === "user" || m.role === "agent")) : []; return saved.length > 1 ? saved : [GREETING_PI]; });
 
   // backend state
   const [ffKey, setFfKey] = useState(""); const [orKey, setOrKey] = useState(""); const [bridgeToken, setBridgeToken] = useState("");
   const [bridgeOnline, setBridgeOnline] = useState(false);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
-  const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
+  const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(() => SESSION.selectedMeeting && typeof SESSION.selectedMeeting === "object" && typeof SESSION.selectedMeeting.id === "string" ? SESSION.selectedMeeting : null);
   const [loadingMeetings, setLoadingMeetings] = useState(false);
-  const [lines, setLines] = useState<Line[]>([]);
+  const [meetingsError, setMeetingsError] = useState("");
+  const [lines, setLines] = useState<Line[]>(() => Array.isArray(SESSION.lines) ? SESSION.lines.filter((l: any) => l && typeof l.speaker === "string" && typeof l.text === "string" && typeof l.id === "string").slice(-500) : []);
   const [liveAnswer, setLiveAnswer] = useState("");
   const [copied, setCopied] = useState(false);
 
   const splitElRef = useRef<HTMLDivElement>(null);
+  const chatComposerRef = useRef<HTMLTextAreaElement>(null);
   const connRef = useRef<{ connect: () => Promise<void>; disconnect: () => void } | null>(null);
   const lastSpeakerRef = useRef(""); const lineCounter = useRef(0); const lastSuggestRef = useRef(0); const lastAnswerRef = useRef(0);
   const suggestionsRef = useRef<Suggestion[]>([]); suggestionsRef.current = suggestions;
+  const answerSeqRef = useRef(0);
   const liveAnswerRef = useRef(""); const sidRef = useRef(1);
+  const sessionSnapRef = useRef({ lines: [] as Line[], suggestions: [] as Suggestion[], messages: [] as Message[], piMessages: [] as Message[], selectedMeeting: null as Meeting | null });
   // Stable PI session id — reused across reloads so PI keeps conversation context.
   const piSessionRef = useRef<string>(SAVED.piSession || ("fl-" + Math.random().toString(36).slice(2, 10)));
 
@@ -87,6 +100,20 @@ export default function App() {
   useEffect(() => {
     try { localStorage.setItem("fl-config", JSON.stringify({ view, mode, model, flags, rate, questionMode, customContext, piSession: piSessionRef.current })); } catch { /* storage unavailable */ }
   }, [view, mode, model, flags, rate, questionMode, customContext]);
+
+  useEffect(() => {
+    const snapshot = { lines: lines.slice(-500), suggestions: suggestions.slice(0, 40), messages, piMessages, selectedMeeting };
+    sessionSnapRef.current = snapshot;
+    const id = window.setTimeout(() => {
+      try { localStorage.setItem("fl-session", JSON.stringify(snapshot)); } catch { /* storage unavailable */ }
+    }, 1000);
+    return () => window.clearTimeout(id);
+  }, [lines, suggestions, messages, piMessages, selectedMeeting]);
+  useEffect(() => {
+    const flushSession = () => { try { localStorage.setItem("fl-session", JSON.stringify(sessionSnapRef.current)); } catch { /* storage unavailable */ } };
+    window.addEventListener("pagehide", flushSession);
+    return () => window.removeEventListener("pagehide", flushSession);
+  }, []);
 
   // derived context for the AI: selected mode + any custom note
   const modeCtx = MODE_CONTEXT[mode] ?? suggested.find(s => s.id === mode)?.context ?? "";
@@ -101,16 +128,25 @@ export default function App() {
     return acc;
   }, []);
   const getCtx = () => grouped.map(l => `[${l.speaker}]: ${l.text}`).join("\n");
+  const { ref: transcriptScrollRef, onScroll: onTranscriptScroll, stick: stickTranscript } = useStickToBottom();
+  const { ref: chatPanelScrollRef, onScroll: onChatPanelScroll, stick: stickChatPanel } = useStickToBottom();
+  const { ref: piPanelScrollRef, onScroll: onPiPanelScroll, stick: stickPiPanel } = useStickToBottom();
+  const { ref: chatViewScrollRef, onScroll: onChatViewScroll, stick: stickChatView } = useStickToBottom();
+
+  useLayoutEffect(() => { stickTranscript(); }, [lines, liveAnswer, stickTranscript]);
+  useLayoutEffect(() => { stickChatPanel(); }, [messages, thinking, stickChatPanel]);
+  useLayoutEffect(() => { stickPiPanel(); }, [piMessages, piThinking, stickPiPanel]);
+  useLayoutEffect(() => { stickChatView(); }, [messages, thinking, stickChatView]);
 
   // ── boot: keys, meetings, bridge health ──────────────────────────
   useEffect(() => { fetchKeys().then(k => { setFfKey(k.ffKey); setOrKey(k.orKey); setBridgeToken(k.bridgeToken); }); }, []);
-  const loadMeetings = async () => {
-    if (!ffKey) return; setLoadingMeetings(true);
-    const { meetings: ms } = await fetchMeetings(ffKey);
-    setMeetings(ms); const a = ms.find(m => m.active); if (a) setSelectedMeeting(a);
+  const loadMeetings = useCallback(async () => {
+    if (!ffKey) return; setLoadingMeetings(true); setMeetingsError("");
+    const { meetings: ms, error } = await fetchMeetings(ffKey);
+    setMeetings(ms); setMeetingsError(error); const a = ms.find(m => m.active); if (a) setSelectedMeeting(a);
     setLoadingMeetings(false);
-  };
-  useEffect(() => { if (ffKey) loadMeetings(); }, [ffKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [ffKey]);
+  useEffect(() => { if (ffKey) loadMeetings(); }, [ffKey, loadMeetings]);
   useEffect(() => {
     let alive = true;
     const ping = () => fetch("/bridge/health").then(r => r.ok).then(ok => { if (alive) setBridgeOnline(ok); }).catch(() => { if (alive) setBridgeOnline(false); });
@@ -147,22 +183,25 @@ export default function App() {
 
   // ── question-mode live answer ────────────────────────────────────
   useEffect(() => {
-    if (!questionMode || !orKey || lines.length === 0) return;
+    if (!questionMode || !orKey || lines.length === 0) { answerSeqRef.current++; setAnswering(false); return; }
     const now = Date.now();
     if (now - lastAnswerRef.current < 5000) return;
     lastAnswerRef.current = now;
     const ctx = lines.slice(-12).map(l => `[${l.speaker}]: ${l.text}`).join("\n");
     const prev = liveAnswerRef.current;
+    const seq = ++answerSeqRef.current;
     setAnswering(true);
     streamLiveAnswer(ctx, orKey, agentContext, model, partial => {
+      if (seq !== answerSeqRef.current) return;
       const p = partial.trim();
       if (p && p !== "—") setLiveAnswer(p); // show it being formulated live
     }).then(final => {
+      if (seq !== answerSeqRef.current) return;
       const f = (final || "").trim();
       if (!f || f === "—") setLiveAnswer(prev); // nothing to say right now — keep the last draft, don't vanish
       else { setLiveAnswer(f); liveAnswerRef.current = f; }
       setAnswering(false);
-    }).catch(() => setAnswering(false));
+    }).catch(() => { if (seq === answerSeqRef.current) setAnswering(false); });
   }, [lines, questionMode, orKey, agentContext, model]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── transcript ingest ────────────────────────────────────────────
@@ -179,9 +218,11 @@ export default function App() {
   };
 
   const startConnection = (m?: Meeting) => {
+    connRef.current?.disconnect();
     const meeting = m ?? selectedMeeting;
     if (m) setSelectedMeeting(m);
-    setLines([]); setSuggestions([]); setLiveAnswer(""); lastSpeakerRef.current = ""; lineCounter.current = 0;
+    setLines([]); setSuggestions([]); setLiveAnswer(""); liveAnswerRef.current = ""; lastSpeakerRef.current = ""; lineCounter.current = 0;
+    try { localStorage.removeItem("fl-session"); } catch { /* storage unavailable */ }
     connRef.current = (ffKey && meeting) ? connectLive(onTranscriptLine, setStatusMapped, ffKey, meeting.id) : connectDemo(onTranscriptLine, setStatusMapped);
     connRef.current.connect();
     setMeetingsOpen(false);
@@ -192,6 +233,20 @@ export default function App() {
     startConnection(meeting);
   };
   const stop = () => connRef.current?.disconnect();
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.isComposing || (!e.metaKey && !e.ctrlKey)) return;
+      if (e.key === "1") { e.preventDefault(); setView("transcript"); }
+      else if (e.key === "2") { e.preventDefault(); setView("split"); }
+      else if (e.key === "3") { e.preventDefault(); setView("chat"); }
+      else if (e.key.toLowerCase() === "k") { e.preventDefault(); if (!meetingsOpen && ffKey) loadMeetings(); setMeetingsOpen(o => !o); }
+      else if (e.key.toLowerCase() === "u") { e.preventDefault(); setQuestionMode(q => !q); }
+      else if (e.key.toLowerCase() === "j") { e.preventDefault(); if (view === "transcript") setView("split"); setTab("chat"); setTimeout(() => chatComposerRef.current?.focus(), 0); }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [view, ffKey, meetingsOpen, loadMeetings]);
 
   const selectMode = (id: string) => setMode(id);
   const toggleFlag = (k: string) => setFlags(f => ({ ...f, [k]: !f[k] }));
@@ -323,9 +378,9 @@ export default function App() {
     </div>
   );
 
-  const renderComposer = (value: string, onChange: (v: string) => void, onSend: () => void, placeholder: string) => (
+  const renderComposer = (value: string, onChange: (v: string) => void, onSend: () => void, placeholder: string, inputRef?: Ref<HTMLTextAreaElement>) => (
     <div className="fl-composer" style={{ display: "flex", alignItems: "flex-end", gap: 10, padding: "8px 8px 8px 18px", background: "#fff", border: `1px solid ${BORDER}`, borderRadius: 16, boxShadow: "0 1px 2px rgba(16,24,40,.04)" }}>
-      <textarea value={value} onChange={e => onChange(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onSend(); } }} placeholder={placeholder} rows={1}
+      <textarea ref={inputRef} value={value} onChange={e => onChange(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onSend(); } }} placeholder={placeholder} rows={1}
         style={{ flex: "1 1 auto", minWidth: 0, border: "none", outline: "none", background: "none", resize: "none", fontFamily: "inherit", fontSize: 14.5, lineHeight: 1.5, color: "oklch(0.3 0.02 255)", padding: "9px 0", maxHeight: 120 }} />
       <button onClick={onSend} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 42, height: 42, borderRadius: 11, background: "var(--ac)", border: "none", color: "#fff", cursor: "pointer", flex: "0 0 auto" }}><Icon id="i-send" /></button>
     </div>
@@ -383,7 +438,7 @@ export default function App() {
           </div>
         ))}
         {activeMeetings.length === 0 && (
-          <div style={{ padding: "14px 4px", fontSize: 13, color: "oklch(0.6 0.015 255)", lineHeight: 1.5 }}>{loadingMeetings ? "Scanning for active meetings…" : ffKey ? "No active meetings right now." : "Add your Fireflies key to detect meetings."}</div>
+          <div style={{ padding: "14px 4px", fontSize: 13, color: meetingsError ? "oklch(0.55 0.16 25)" : "oklch(0.6 0.015 255)", lineHeight: 1.5 }}>{loadingMeetings ? "Scanning for active meetings…" : meetingsError || (ffKey ? "No active meetings right now." : "Add your Fireflies key to detect meetings.")}</div>
         )}
       </div>
       <div style={{ height: 1, background: "oklch(0.93 0.006 255)", margin: "18px 0" }} />
@@ -406,18 +461,18 @@ export default function App() {
             {isConnected && selectedMeeting && <div style={{ fontSize: 13, color: "oklch(0.6 0.015 255)", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{selectedMeeting.title}</div>}
           </div>
         </div>
-        {isConnected && (
+        {isConnected && <button onClick={() => setQuestionMode(q => !q)} style={qBtnStyle(questionMode)}><Icon id="i-sparkles" size={16} />Question mode</button>}
+        {(isConnected || grouped.length > 0) && (
           <div style={{ display: "flex", alignItems: "center", gap: 10, flex: "0 0 auto" }}>
-            <button onClick={() => setQuestionMode(q => !q)} style={qBtnStyle(questionMode)}><Icon id="i-sparkles" size={16} />Question mode</button>
             <button onClick={copyTx} title="Copy" className="fl-hover-soft" style={{ ...iconBtn }}><Icon id={copied ? "i-check" : "i-copy"} size={17} stroke={copied ? "oklch(0.6 0.14 155)" : "currentColor"} /></button>
             <button onClick={exportMd} title="Export all outputs" className="fl-hover-soft" style={{ ...iconBtn }}><Icon id="i-download" size={17} /></button>
           </div>
         )}
       </div>
-      <div className="fl-scroll" style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto" }}>
-        {isConnected && (
+      <div ref={transcriptScrollRef} onScroll={onTranscriptScroll} className="fl-scroll" style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto" }}>
+        {(isConnected || (isIdle && grouped.length > 0)) && (
           <div style={{ padding: "8px 32px 32px" }}>
-            {questionMode && (
+            {isConnected && questionMode && (
               <div style={{ position: "sticky", top: 0, zIndex: 5, margin: "16px 0 26px", padding: "20px 22px", background: "linear-gradient(180deg,var(--ac-tint),#fff)", border: "1px solid var(--ac-border)", borderRadius: 16, boxShadow: "0 8px 24px -18px var(--ac)" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
                   <span style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "5px 11px", background: "var(--ac)", borderRadius: 999, color: "#fff", fontSize: 11.5, fontWeight: 700, letterSpacing: "0.01em" }}><Icon id="i-arrow" size={13} sw={2.2} />Say this</span>
@@ -437,17 +492,16 @@ export default function App() {
               {grouped.map(l => (
                 <div key={l.id}>
                   <div style={{ fontSize: 12.5, fontWeight: 700, letterSpacing: "0.01em", marginBottom: 5, color: speakerColor(l.speaker) }}>{l.speaker}</div>
-                  <div style={{ fontSize: 15.5, lineHeight: 1.7, color: "oklch(0.32 0.018 255)" }}>{l.text}{!l.isFinal && <span style={{ display: "inline-block", width: 7, height: 16, background: "var(--ac)", borderRadius: 2, marginLeft: 4, verticalAlign: "middle", animation: "fl-blink 1.1s steps(1) infinite" }} />}</div>
+                  <div style={{ fontSize: 15.5, lineHeight: 1.7, color: "oklch(0.32 0.018 255)" }}>{l.text}{isConnected && !l.isFinal && <span style={{ display: "inline-block", width: 7, height: 16, background: "var(--ac)", borderRadius: 2, marginLeft: 4, verticalAlign: "middle", animation: "fl-blink 1.1s steps(1) infinite" }} />}</div>
                 </div>
               ))}
-              <div style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 4, color: "oklch(0.7 0.012 255)", fontSize: 13 }}>
-                <span style={{ width: 7, height: 16, background: "var(--ac)", borderRadius: 2, animation: "fl-blink 1.1s steps(1) infinite", display: "inline-block" }} />
-                <span>Listening…</span>
-              </div>
+              {isConnected
+                ? <div style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 4, color: "oklch(0.7 0.012 255)", fontSize: 13 }}><span style={{ width: 7, height: 16, background: "var(--ac)", borderRadius: 2, animation: "fl-blink 1.1s steps(1) infinite", display: "inline-block" }} /><span>Listening…</span></div>
+                : <div style={{ fontSize: 13, color: "oklch(0.6 0.015 255)", paddingTop: 4 }}>Restored from your last session — connect to continue.</div>}
             </div>
           </div>
         )}
-        {isIdle && (
+        {isIdle && grouped.length === 0 && (
           <div style={{ height: "100%", minHeight: 480, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", padding: 48 }}>
             <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 74, height: 74, borderRadius: 20, background: "var(--ac-tint)", marginBottom: 26, position: "relative" }}>
               <span style={{ position: "absolute", inset: 0, borderRadius: 20, border: "2px solid var(--ac-border)", animation: "fl-pulse 2.6s ease-out infinite" }} />
@@ -529,8 +583,8 @@ export default function App() {
     <section style={{ display: "flex", flexDirection: "column" }}>
       {sectionLabel("i-message", "AI assistant", !orKey ? <span style={{ fontSize: 11.5, fontWeight: 600, color: "oklch(0.6 0.015 255)" }}>offline</span> : undefined)}
       <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 18 }}>
-        <div className="fl-scroll" style={{ display: "flex", flexDirection: "column", gap: 20, maxHeight: "min(56vh, 540px)", overflowY: "auto", paddingRight: 4 }}>{renderThread(messages, thinking)}</div>
-        {renderComposer(chatInput, setChatInput, sendChat, "Ask anything about the meeting…")}
+        <div ref={chatPanelScrollRef} onScroll={onChatPanelScroll} className="fl-scroll" style={{ display: "flex", flexDirection: "column", gap: 20, maxHeight: "min(56vh, 540px)", overflowY: "auto", paddingRight: 4 }}>{renderThread(messages, thinking)}</div>
+        {renderComposer(chatInput, setChatInput, sendChat, "Ask anything about the meeting…", chatComposerRef)}
       </div>
     </section>
   );
@@ -539,7 +593,7 @@ export default function App() {
     <section style={{ display: "flex", flexDirection: "column" }}>
       {sectionLabel("i-terminal", "PI", <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 600, color: "oklch(0.6 0.015 255)" }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: bridgeOnline ? "oklch(0.68 0.16 155)" : "oklch(0.7 0.01 250)" }} />{bridgeOnline ? "online" : "offline"}</span>)}
       <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 18 }}>
-        <div className="fl-scroll" style={{ display: "flex", flexDirection: "column", gap: 20, maxHeight: "min(56vh, 540px)", overflowY: "auto", paddingRight: 4 }}>{renderThread(piMessages, piThinking)}</div>
+        <div ref={piPanelScrollRef} onScroll={onPiPanelScroll} className="fl-scroll" style={{ display: "flex", flexDirection: "column", gap: 20, maxHeight: "min(56vh, 540px)", overflowY: "auto", paddingRight: 4 }}>{renderThread(piMessages, piThinking)}</div>
         {renderComposer(piInput, setPiInput, submitPI, "Message PI — ask, or run a command…")}
       </div>
     </section>
@@ -577,8 +631,8 @@ export default function App() {
             <div style={{ fontSize: 13, color: "oklch(0.6 0.015 255)", marginTop: 1 }}>Ask anything about this meeting{!orKey && " · AI offline"}</div>
           </div>
         </div>
-        <div className="fl-scroll" style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", padding: "18px 40px 8px" }}>{renderThread(messages, thinking)}</div>
-        <div style={{ padding: "18px 40px 30px", flex: "0 0 auto" }}>{renderComposer(chatInput, setChatInput, sendChat, "Ask anything about the meeting…")}</div>
+        <div ref={chatViewScrollRef} onScroll={onChatViewScroll} className="fl-scroll" style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", padding: "18px 40px 8px" }}>{renderThread(messages, thinking)}</div>
+        <div style={{ padding: "18px 40px 30px", flex: "0 0 auto" }}>{renderComposer(chatInput, setChatInput, sendChat, "Ask anything about the meeting…", chatComposerRef)}</div>
       </div>
     </div>
   );

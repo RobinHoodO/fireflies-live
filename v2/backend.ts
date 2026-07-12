@@ -57,7 +57,7 @@ export async function fetchMeetings(apiKey: string): Promise<{ meetings: Meeting
   }
 }
 
-export async function callAI(messages: { role: string; content: string }[], key: string, model = "anthropic/claude-sonnet-4"): Promise<string> {
+export async function callAI(messages: { role: string; content: string }[], key: string, model = "anthropic/claude-sonnet-5"): Promise<string> {
   const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", "HTTP-Referer": "http://localhost:5173", "X-Title": "Fireflies Live" },

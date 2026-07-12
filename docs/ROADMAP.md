@@ -41,8 +41,14 @@ Status legend: ✅ done · 🟡 in progress · ⬜ planned
 - ✅ Suggestions filter by type + expand/collapse (newest/most-relevant by default).
 - ✅ Export meeting (transcript + suggestions + chat) to Markdown.
 - ✅ AI-offline state in-UI when `OPENROUTER_API` is missing.
-- ⬜ Persist session (transcript + suggestions + config) to localStorage; restore on reload.
-- ⬜ Keyboard shortcuts (connect, toggle question mode, focus chat, switch views).
+- ✅ Persist session (transcript + suggestions + chat + PI log) to localStorage; restore on
+  reload with a "Restored from your last session" transcript state (debounced + pagehide flush,
+  shape-validated so a corrupt blob can't white-screen).
+- ✅ Keyboard shortcuts — ⌘/Ctrl+1/2/3 views, ⌘K meetings, ⌘U question mode, ⌘J focus chat.
+- ✅ Stick-to-bottom autoscroll on transcript + chat + PI threads (never hijacks after scroll-up).
+- ✅ 2026-07 fix pass: reconnect socket leak, question-mode stream race (seq guard),
+  meetings-API errors surfaced in the popover, model roster refreshed to current OpenRouter
+  slugs (Sonnet 5 default) with stale-slug migration.
 - ⬜ Sentiment / key-moments flags wired to real behavior (currently inert toggles).
 
 ## Phase 3 — Backend delegation bridge (🟡 MVP shipped, security-sensitive)
@@ -76,12 +82,31 @@ frontend can use to delegate work to **PI** (terminal agent) with full system ac
 - ⬜ Multi-meeting support; meeting history browser (re-introduce Recent).
 - ⬜ Tests (Vitest + Playwright) and CI.
 
+## Phase 6 — Thrivbe OS integration (⬜ planned — the strategic home)
+
+Fireflies Live is the missing **"during-meeting" layer** of the sales OS meeting loop
+already running on Thrivbe-1 (research before → ??? during → meeting-analyser → Notion/
+Twenty after). Weave, in order of leverage:
+
+- ⬜ **End & File** — on Stop, write the Markdown export into
+  `~/Thrivbe-AI/content/meetings/transcripts/` so the existing meeting-analyser skill
+  ingests it unchanged (analysis → Notion meeting page → decisions + tasks). Zero new infra.
+- ⬜ **Command → kernel delegation** — replace local `pi` spawn with a POST to the
+  thrivbe-os kernel on Thrivbe-1 (voice-bridge pattern: confirmation gate + tool manifest).
+  Mid-meeting "do" / "command" suggestions land in **Bloom** as tracked tasks and execute
+  on the fleet instead of dying in a local chat pane.
+- ⬜ **Command Center absorption** — end-state: this app becomes CC's `/meetings/live` tab
+  on Thrivbe-1 (tailnet :3002), keys held server-side. That *is* the deploy/config story
+  (today keys come from a Vite dev middleware reading `~/Thrivbe-AI/.env` — Mac dev only).
+- 100x framing: live copilot on Robin's own calls = Client Zero's most demoable
+  "AI employee" artifact → labs entry + AI-Factory story.
+
 ---
 
 ## Known follow-ups / tech debt
 
-- Pre-existing unused `statusMsg`/`setStatusMsg` and `src/hooks/useFirefliesConnection.ts`
-  (dead file) — remove in a cleanup pass.
+- Pre-existing unused `statusMsg`/`setStatusMsg` in v1 (`src/App.tsx`) — remove in a cleanup
+  pass. (`src/hooks/useFirefliesConnection.ts` deleted 2026-07.)
 - Vite dev server reads `OPENROUTER_API` / `FIREFLY_API_KEY` from `~/Thrivbe-AI/.env`
   via a dev middleware; needs a real config story for non-dev deploys.
 - Question mode assumes "other speakers ask the host"; no true host identification yet.

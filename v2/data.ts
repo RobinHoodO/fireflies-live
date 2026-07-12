@@ -16,37 +16,34 @@ export const MODES = [
 // OpenRouter model slugs (verified slug format). Grouped by provider.
 export const MODELS = [
   { p: "Anthropic", items: [
-    { id: "anthropic/claude-sonnet-4", l: "Claude Sonnet 4" },
-    { id: "anthropic/claude-opus-4.1", l: "Claude Opus 4.1" },
-    { id: "anthropic/claude-3.7-sonnet", l: "Claude 3.7 Sonnet" },
-    { id: "anthropic/claude-3.5-haiku", l: "Claude 3.5 Haiku" },
+    { id: "anthropic/claude-sonnet-5", l: "Claude Sonnet 5" },
+    { id: "anthropic/claude-opus-4.8", l: "Claude Opus 4.8" },
+    { id: "anthropic/claude-haiku-4.5", l: "Claude Haiku 4.5" },
   ] },
   { p: "OpenAI", items: [
-    { id: "openai/gpt-4.1", l: "GPT-4.1" },
-    { id: "openai/gpt-4o", l: "GPT-4o" },
-    { id: "openai/gpt-4o-mini", l: "GPT-4o mini" },
-    { id: "openai/o3", l: "o3" },
-    { id: "openai/o4-mini", l: "o4-mini" },
+    { id: "openai/gpt-5.6-terra", l: "GPT-5.6 Terra" },
+    { id: "openai/gpt-5.6-sol", l: "GPT-5.6 Sol" },
+    { id: "openai/gpt-5.5", l: "GPT-5.5" },
+    { id: "openai/gpt-5.4-mini", l: "GPT-5.4 mini" },
   ] },
   { p: "Google", items: [
-    { id: "google/gemini-2.5-pro", l: "Gemini 2.5 Pro" },
-    { id: "google/gemini-2.5-flash", l: "Gemini 2.5 Flash" },
-    { id: "google/gemini-2.0-flash-001", l: "Gemini 2.0 Flash" },
+    { id: "google/gemini-3.5-flash", l: "Gemini 3.5 Flash" },
+    { id: "google/gemini-3.1-flash-lite", l: "Gemini 3.1 Flash Lite" },
   ] },
   { p: "DeepSeek", items: [
-    { id: "deepseek/deepseek-v4-flash", l: "DeepSeek V4 Flash" },
     { id: "deepseek/deepseek-v4-pro", l: "DeepSeek V4 Pro" },
+    { id: "deepseek/deepseek-v4-flash", l: "DeepSeek V4 Flash" },
     { id: "deepseek/deepseek-v3.2", l: "DeepSeek V3.2" },
-    { id: "deepseek/deepseek-chat-v3.1", l: "DeepSeek V3.1" },
-    { id: "deepseek/deepseek-r1-0528", l: "DeepSeek R1" },
   ] },
   { p: "Meta Llama", items: [
+    { id: "meta-llama/llama-4-maverick", l: "Llama 4 Maverick" },
     { id: "meta-llama/llama-3.3-70b-instruct", l: "Llama 3.3 70B" },
-    { id: "meta-llama/llama-3.1-405b-instruct", l: "Llama 3.1 405B" },
   ] },
-  { p: "xAI", items: [{ id: "x-ai/grok-2-1212", l: "Grok 2" }] },
-  { p: "Mistral", items: [{ id: "mistralai/mistral-large", l: "Mistral Large" }] },
+  { p: "xAI", items: [{ id: "x-ai/grok-4.5", l: "Grok 4.5" }] },
+  { p: "Mistral", items: [{ id: "mistralai/mistral-large-2512", l: "Mistral Large" }] },
 ];
+
+export const MODEL_IDS = MODELS.flatMap(g => g.items.map(i => i.id));
 
 export const FLAGS = [
   { k: "autosuggest", l: "Auto-suggest" }, { k: "sentiment", l: "Sentiment" }, { k: "actions", l: "Action items" },
