@@ -68,7 +68,11 @@ research            │ FIREFLIES LIVE │──📁──▶ → Notion page
 - ✅ 🩹 2026-07-12 fix pass: reconnect socket leak, question-mode stream race (seq guard) +
   stuck `answering` flag, meetings-API errors surfaced in the popover, model roster
   refreshed to current OpenRouter slugs (Sonnet 5 default) with stale-slug migration.
-- ⬜ 📈 Sentiment / key-moments flags wired to real behavior (currently inert toggles).
+- ✅ 📈 Live sentiment analysis *(2026-07-14)* — dedicated ~60-token fast-model micro-call
+  every 20s (`fetchSentiment`, navigator-pattern clone: seq guard, clamp, null on failure);
+  sidebar strip with current-mood label + score + SVG sparkline (green/gray/red), wired to
+  the existing Sentiment toggle; in Markdown export; reset per connection. Key-moments
+  flag still inert.
 
 ## 🖥️ Phase 3 — Backend delegation bridge (🟡 MVP shipped, security-sensitive)
 
@@ -98,6 +102,8 @@ frontend can use to delegate work to **PI** (terminal agent) with full system ac
 
 - ⬜ 🏅 Relevance ranking for suggestions (not just recency).
 - ⬜ 👤 Per-speaker context / roles; "who is the host" detection for question mode.
+- ⬜ 🎙️ Voice analysis — per-speaker tone/energy/prosody from actual audio (not text).
+  Depends on Phase 4 tab-audio capture; complements text sentiment with how things are said.
 - ⬜ 🤝 Auto-actions (let approved suggestions execute without a click).
 - ⬜ 🗂️ Multi-meeting support; meeting history browser (re-introduce Recent).
 - ⬜ 🧪 Tests (Vitest + Playwright) and CI.

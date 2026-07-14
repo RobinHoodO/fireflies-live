@@ -5,8 +5,10 @@
 
 export type ConnStatus = "disconnected" | "connecting" | "connected" | "error";
 export type SugType = "ask" | "do" | "note" | "command";
+export type AgendaKind = "topic" | "clarify" | "branch";
 export interface BackendSuggestion { id: number; type: SugType; text: string; t: number }
 export interface NavFrame { phase: string; stance: string; goal_progress: string; next_move: string; risk: string }
+export interface SentimentPoint { score: number; label: string; t: number }
 export interface ConstellationSource { kind: string; label: string; n: number }
 export interface Constellation { bundle: string; sources: ConstellationSource[]; counterpart: string; topic: string }
 
@@ -24,6 +26,22 @@ export const MODE_CONTEXT: Record<string, string> = {
 
 // Map the old suggestion taxonomy (question/action/insight) onto v2's (ask/do/note).
 const TYPE_MAP: Record<string, SugType> = { question: "ask", action: "do", insight: "note" };
+
+function modelJsonArray(raw: string): any[] | null {
+  const clean = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "");
+  try {
+    const value = JSON.parse(clean.slice(clean.indexOf("["), clean.lastIndexOf("]") + 1));
+    return Array.isArray(value) ? value : null;
+  } catch { return null; }
+}
+
+function modelJsonObject(raw: string): Record<string, any> | null {
+  const clean = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "");
+  try {
+    const value = JSON.parse(clean.slice(clean.indexOf("{"), clean.lastIndexOf("}") + 1));
+    return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+  } catch { return null; }
+}
 
 export async function fetchKeys(): Promise<{ ffKey: string; orKey: string; bridgeToken: string }> {
   try {
@@ -114,6 +132,16 @@ No prose.${goal ? ` ROBIN'S GOAL: ${goal}` : ""}${bundleHint ? `\nBACKGROUND:\n$
   } catch { return null; }
 }
 
+export async function fetchSentiment(ctx: string, key: string, model: string): Promise<{ score: number; label: string } | null> {
+  const sys = `Rate the OTHER participants' current sentiment toward the conversation (exclude the speaker "You" = Robin). Output JSON only: {"score": <number -1 to 1, negative=hostile/cold, 0=neutral, positive=warm/enthusiastic>, "label": "<their mood in 1-2 words>"}. No prose.`;
+  try {
+    const raw = await callAI([{ role: "system", content: sys }, { role: "user", content: `Transcript (latest last):\n${ctx}` }], key, model, 60);
+    const value = modelJsonObject(raw);
+    if (!value || typeof value.score !== "number" || !Number.isFinite(value.score) || typeof value.label !== "string") return null;
+    return { score: Math.max(-1, Math.min(1, value.score)), label: value.label.trim().slice(0, 24) };
+  } catch { return null; }
+}
+
 // A suggestion to add (id:null), refine in place (id = existing suggestion id), or mark complete.
 export interface SuggestionUpdate { id: number | null; type: SugType; text: string; status?: "done"; outcome?: string }
 
@@ -132,8 +160,9 @@ Read the latest transcript, then decide changes:
 - Only propose a "command" when running something on Robin's machine is clearly useful and safe.
 Each item: {"id": <existing id or null>, "type": "ask"|"do"|"note"|"command", "text": "<under 14 words; for command, the exact shell command>"}. For a follow-through update, only "id", "status", and "outcome" are required; the app preserves its original text and type. Respond ONLY with a JSON array (it may be empty). No prose.`;
   const raw = await callAI([{ role: "system", content: sys }, { role: "user", content: `Transcript:\n${ctx}` }], key, model);
+  const arr = modelJsonArray(raw);
+  if (!arr) return [];
   try {
-    const arr = JSON.parse(raw.slice(raw.indexOf("["), raw.lastIndexOf("]") + 1));
     const valid: SugType[] = ["ask", "do", "note", "command"];
     return arr.filter((x: any) => x && (x.text || x.status === "done")).slice(0, 6).map((x: any) => ({
       id: typeof x.id === "number" ? x.id : null,
@@ -144,13 +173,49 @@ Each item: {"id": <existing id or null>, "type": "ask"|"do"|"note"|"command", "t
   } catch { return []; }
 }
 
+// An agenda item to add (id:null), refine in place (id = existing item id), or mark done.
+export interface AgendaUpdate { id: number | null; text: string; kind?: AgendaKind; status?: "done" }
+export interface AgendaResult { items: AgendaUpdate[]; order: number[] }
+
+export async function fetchAgenda(
+  ctx: string, key: string, goal: string, bundleHint: string, meetingTitle: string, model: string,
+  existing: { id: number; text: string; kind: AgendaKind; done?: boolean; votes: number; source: "ai" | "you" }[],
+): Promise<AgendaResult | null> {
+  const list = existing.map(item => ({ id: item.id, text: item.text, kind: item.kind, done: !!item.done, votes: item.votes, source: item.source }));
+  const sys = `You maintain Robin's dynamic meeting agenda: the compact priority-ordered list of points to cover next in this meeting.
+Kinds: "topic" is a point to cover; "clarify" is an open question or unresolved point that still needs clarification; "branch" is a promising conversation direction worth steering into for Robin's goal.
+MEETING TITLE: ${meetingTitle || "Meeting"}
+ROBIN'S GOAL: ${goal || "Advance the meeting productively."}${bundleHint ? `\nBACKGROUND (Robin's resources):\n${bundleHint}` : ""}
+Current agenda as JSON: ${JSON.stringify(list)}. "source" says whether Robin or AI added the item; preserve that history. "done" items have already been covered.
+Read the latest transcript, then maintain the agenda:
+- When the current agenda is empty, seed useful initial points from Robin's goal and the background.
+- Add a new point only when the conversation surfaces a topic people clearly want to cover, an open point that needs clarifying, or a branch worth steering into — and it is not already represented.
+- Refine an existing point in place with its SAME id when newer context makes it more precise (a "clarify" that got answered but opened a follow-up may change kind). Never create a near-duplicate.
+- Mark an existing point with its SAME id and "status":"done" only when transcript evidence shows it was covered, resolved, or clearly made irrelevant. Do not mark it done without evidence.
+- Return the full desired priority order as ids in "order". Keep all current ids in that order; the order changes priority, never deletes agenda items.
+- VOTING IS A HARD SIGNAL: items with positive votes must stay near the top and must never be dropped. Items with votes <= -2 must be deprioritized to the bottom, or marked done only when transcript evidence shows they are irrelevant. Never remove or reorder against a user's explicit votes.
+Each item is {"id":<existing id or null>,"kind":"topic"|"clarify"|"branch","text":"<under 16 words>"}; a done update may omit text and kind. New items use "id":null. Respond ONLY with {"items":[...],"order":[id,id,...]}. No prose or markdown.`;
+  try {
+    const raw = await callAI([{ role: "system", content: sys }, { role: "user", content: `Transcript (latest last):\n${ctx}` }], key, model, 800);
+    const value = modelJsonObject(raw);
+    if (!value || !Array.isArray(value.items) || !Array.isArray(value.order)) return null;
+    if (!value.order.every((id: any) => Number.isInteger(id))) return null;
+    if (!value.items.every((item: any) => item && typeof item === "object" && (item.id === null || Number.isInteger(item.id)) && (item.status === undefined || item.status === "done") && (typeof item.text === "string" || (item.status === "done" && typeof item.id === "number")))) return null;
+    const kinds: AgendaKind[] = ["topic", "clarify", "branch"];
+    return {
+      items: value.items.map((item: any) => ({ id: item.id, text: typeof item.text === "string" ? item.text : "", ...(kinds.includes(item.kind) ? { kind: item.kind as AgendaKind } : {}), ...(item.status === "done" ? { status: "done" as const } : {}) })),
+      order: value.order,
+    };
+  } catch { return null; }
+}
+
 // Live "Say this" answer, streamed token-by-token via onDelta so the UI shows it
 // being formulated. Resolves with the final text ("—" when no response is needed).
 export async function streamLiveAnswer(
   ctx: string, key: string, context: string, model: string,
   onDelta: (partial: string) => void,
 ): Promise<string> {
-  const sys = `You are Robin's live meeting copilot. Always draft, in Robin's own first-person voice, the single best thing Robin could say right now — ready to read aloud (1-3 sentences). Frame everything from Robin's perspective. Look at the most recent turns: if someone asked Robin something, answer it directly; otherwise give Robin's natural next line to move the conversation forward. Always produce a usable response — never decline, never output a dash or placeholder. No preamble, no labels.${context ? ` Context: ${context}` : ""}`;
+  const sys = `You are Robin's live meeting copilot. Always draft, in Robin's own first-person voice, the single best thing Robin could say right now — ready to read aloud (1-3 sentences). Frame everything from Robin's perspective. Look at the most recent turns: if someone asked Robin something, answer it directly; otherwise proactively draft the line that best steers the conversation toward Robin's stated goal. Always produce a usable response — never decline, never output a dash or placeholder. No preamble, no labels.${context ? ` Context: ${context}` : ""}`;
   const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", "HTTP-Referer": "http://localhost:5173", "X-Title": "Fireflies Live" },
@@ -176,8 +241,9 @@ export async function streamLiveAnswer(
 export async function proposeModes(ctx: string, key: string, model: string): Promise<{ label: string; context: string }[]> {
   const sys = `You are configuring a real-time meeting copilot. From the transcript, infer the meeting type and the host's likely goal. Propose up to 4 distinct "agent modes" — each a short label plus a one-sentence context instruction. Respond ONLY as a JSON array: [{"label":"...","context":"..."}].`;
   const raw = await callAI([{ role: "system", content: sys }, { role: "user", content: `Transcript:\n${ctx}` }], key, model);
+  const arr = modelJsonArray(raw);
+  if (!arr) return [];
   try {
-    const arr = JSON.parse(raw.slice(raw.indexOf("["), raw.lastIndexOf("]") + 1));
     return arr.filter((x: any) => x?.label && x?.context).slice(0, 4).map((x: any) => ({ label: String(x.label), context: String(x.context) }));
   } catch { return []; }
 }

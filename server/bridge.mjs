@@ -252,9 +252,11 @@ const server = http.createServer((req, res) => {
       }
 
       let client = null;
-      if (counterpart) {
+      {
         try {
-          const words = counterpart.toLowerCase().match(/[\p{L}\p{N}]+/gu)?.filter((word) => word.length > 3) || [];
+          // Match against counterpart, topic, AND goal — a client name typed only into
+          // the goal field (e.g. "Toniic website creation…") should still resolve.
+          const words = [counterpart, topic, goal].join(" ").toLowerCase().match(/[\p{L}\p{N}]+/gu)?.filter((word) => word.length > 3) || [];
           const folders = await readdir(CLIENTS_ROOT, { withFileTypes: true });
           const folder = folders.find((entry) => entry.isDirectory() && words.some((word) => entry.name.toLowerCase().includes(word)));
           if (folder) {
@@ -262,21 +264,30 @@ const server = http.createServer((req, res) => {
             if (dirPath) {
               const entries = await readdir(dirPath, { withFileTypes: true });
               const names = entries.slice(0, 15).map((entry) => entry.name);
-              const markdown = entries.find((entry) => entry.isFile() && entry.name.endsWith(".md"));
-              let excerpt = "";
-              if (markdown) {
-                const markdownPath = rootedPath(CLIENTS_ROOT, path.join(folder.name, markdown.name));
-                if (markdownPath) {
-                  try {
-                    const st = await stat(markdownPath);
-                    if (st.size <= 2_000_000) {
-                      const content = await readFile(markdownPath, "utf8");
-                      excerpt = content.length > 1500 ? `${content.slice(0, 1500)}\n…[truncated]` : content;
-                    }
-                  } catch { /* optional client note */ }
-                }
+
+              // Every top-level .md, plus one level into each subfolder (e.g. meetings/, research/).
+              const mdPaths = entries.filter((e) => e.isFile() && e.name.endsWith(".md")).map((e) => path.join(folder.name, e.name));
+              for (const sub of entries.filter((e) => e.isDirectory())) {
+                try {
+                  const subEntries = await readdir(rootedPath(CLIENTS_ROOT, path.join(folder.name, sub.name)), { withFileTypes: true });
+                  for (const e of subEntries.filter((e) => e.isFile() && e.name.endsWith(".md"))) {
+                    mdPaths.push(path.join(folder.name, sub.name, e.name));
+                  }
+                } catch { /* unreadable subfolder */ }
               }
-              client = { dirname: folder.name, names, excerpt };
+
+              const files = [];
+              for (const relPath of mdPaths.slice(0, 8)) {
+                const fullPath = rootedPath(CLIENTS_ROOT, relPath);
+                if (!fullPath) continue;
+                try {
+                  const st = await stat(fullPath);
+                  if (st.size > 2_000_000) continue;
+                  const content = await readFile(fullPath, "utf8");
+                  files.push({ path: relPath, excerpt: content.length > 1200 ? `${content.slice(0, 1200)}\n…[truncated]` : content });
+                } catch { /* stale entry */ }
+              }
+              client = { dirname: folder.name, names, files };
             }
           }
         } catch { /* client corpus is optional */ }
@@ -284,6 +295,13 @@ const server = http.createServer((req, res) => {
 
       const sections = [];
       const sourceFor = [];
+      // Client folder first: it's the operator's own curated prep for this exact
+      // counterpart, so it must never lose the size budget to semsearch hits.
+      if (client) {
+        const fileBlock = client.files.map((f) => `### ${f.path}\n${f.excerpt}`).join("\n\n");
+        sections.push(`## 📁 Client folder\n${client.dirname}: ${client.names.join(", ")}${fileBlock ? `\n\n${fileBlock}` : ""}`);
+        sourceFor.push({ kind: "client", label: "client folder", n: client.files.length || 1 });
+      }
       const people = hits.people || [];
       if (people.length) {
         sections.push(`## 🧑 People\n${people.map((hit) => `- ${hit.name || "Unknown"} — ${hit.headline || ""} · ${hit.company || ""} · ${hit.location || ""} (score ${hit.score.toFixed(2)})`).join("\n")}`);
@@ -303,16 +321,11 @@ const server = http.createServer((req, res) => {
         sections.push(`## 🧠 Knowledge base\n${notion.map((hit) => `- ${hit.title}`).join("\n")}`);
         sourceFor.push({ kind: "notion", label: "knowledge", n: notion.length });
       }
-      if (client) {
-        sections.push(`## 📁 Client folder\n${client.dirname}: ${client.names.join(", ")}${client.excerpt ? `\n\n${client.excerpt}` : ""}`);
-        sourceFor.push({ kind: "client", label: "client folder", n: 1 });
-      }
-
       let bundle = "";
       const sources = [];
       for (let i = 0; i < sections.length; i++) {
         const next = bundle ? `${bundle}\n\n${sections[i]}` : sections[i];
-        if (next.length > 8000) break;
+        if (next.length > 8000) continue; // skip oversized sections, smaller later ones may still fit
         bundle = next;
         sources.push(sourceFor[i]);
       }
