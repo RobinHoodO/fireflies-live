@@ -336,3 +336,6 @@ export function connectDemo(onLine: LineCb, onStatus: StatusCb) {
     disconnect() { running = false; onStatus("disconnected"); },
   };
 }
+
+// Test-only surface — pure helpers exercised by v2/backend.test.ts.
+export const __test = { modelJsonArray, modelJsonObject, shq };
