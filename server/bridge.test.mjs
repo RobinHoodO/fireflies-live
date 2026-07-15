@@ -23,7 +23,7 @@ before(async () => {
   await mkdir(path.join(clientsDir, "Acme-Website"));
   await writeFile(path.join(clientsDir, "Acme-Website", "prep.md"), "# Acme prep");
   child = spawn("node", ["server/bridge.mjs"], {
-    env: { ...process.env, BRIDGE_TOKEN: TOKEN, BRIDGE_PORT: String(PORT), BRIDGE_FILE_DIR: fileDir, BRIDGE_CLIENTS_ROOT: clientsDir },
+    env: { ...process.env, BRIDGE_TOKEN: TOKEN, BRIDGE_PORT: String(PORT), BRIDGE_FILE_DIR: fileDir, BRIDGE_CLIENTS_ROOT: clientsDir, BRIDGE_AUDIT_FILE: path.join(fileDir, "audit.log") },
     stdio: "ignore",
   });
   let ready = false;
@@ -178,6 +178,13 @@ test("/file collision gets -2 suffix", async () => {
   assert.equal(r.status, 200);
   const { path: written } = await r.json();
   assert.match(path.basename(written), /-live-2\.md$/);
+});
+
+test("audit log stores metadata, not command bodies, by default", async () => {
+  await runCmd("echo audit-canary-string");
+  const log = await readFile(path.join(fileDir, "audit.log"), "utf8");
+  assert.ok(log.includes("RUN"), "expected a RUN audit line");
+  assert.ok(!log.includes("audit-canary-string"), "raw command text must not be logged without BRIDGE_AUDIT_BODIES=1");
 });
 
 test("real transcripts dir untouched (test used temp dir)", () => {

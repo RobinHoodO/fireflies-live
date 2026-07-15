@@ -18,7 +18,10 @@ import path from "node:path";
 
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.BRIDGE_PORT) || 8787;
-const AUDIT = path.resolve(process.cwd(), "server", "audit.log");
+const AUDIT = process.env.BRIDGE_AUDIT_FILE || path.resolve(process.cwd(), "server", "audit.log");
+// Audit metadata only by default — the log otherwise accumulates meeting content
+// and operator queries at rest. Opt into body logging for debugging.
+const AUDIT_BODIES = process.env.BRIDGE_AUDIT_BODIES === "1";
 const MAX_OUTPUT = 200_000; // bytes per run, then truncate
 const MAX_MS = 120_000;     // hard timeout per command
 const FILE_DIR = process.env.BRIDGE_FILE_DIR || "/Users/robinsverd/Thrivbe-AI/content/meetings/transcripts";
@@ -150,14 +153,14 @@ const server = http.createServer((req, res) => {
       if (!cmd) { send(res, { type: "exit", code: 1, error: "empty command" }); res.end(); return; }
       const bad = denied(cmd);
       if (bad) {
-        await appendFile(AUDIT, `${new Date().toISOString()} BLOCKED ${cmd}\n`).catch(() => {});
+        await appendFile(AUDIT, `${new Date().toISOString()} BLOCKED pattern=${bad}${AUDIT_BODIES ? ` ${cmd}` : ""}\n`).catch(() => {});
         send(res, { type: "err", data: `Blocked by guardrail (${bad}). Refused.` });
         send(res, { type: "exit", code: 126 });
         res.end();
         return;
       }
 
-      await appendFile(AUDIT, `${new Date().toISOString()} RUN ${cmd}\n`).catch(() => {});
+      await appendFile(AUDIT, `${new Date().toISOString()} RUN ${AUDIT_BODIES ? cmd : `${Buffer.byteLength(cmd)} bytes`}\n`).catch(() => {});
       send(res, { type: "start", cmd });
 
       // Closed stdin ("ignore") so non-interactive tools get EOF instead of blocking
@@ -191,14 +194,14 @@ const server = http.createServer((req, res) => {
       // transcript-derived commands, so they get no weaker a gate.
       const bad = denied(message);
       if (bad) {
-        await appendFile(AUDIT, `${new Date().toISOString()} PI-BLOCKED ${sessionId} ${message.slice(0, 120).replace(/\n/g, " ")}\n`).catch(() => {});
+        await appendFile(AUDIT, `${new Date().toISOString()} PI-BLOCKED ${sessionId} pattern=${bad}${AUDIT_BODIES ? ` ${message.slice(0, 120).replace(/\n/g, " ")}` : ""}\n`).catch(() => {});
         send(res, { type: "err", data: `Blocked by guardrail (${bad}). Refused.` });
         send(res, { type: "exit", code: 126 });
         res.end();
         return;
       }
 
-      await appendFile(AUDIT, `${new Date().toISOString()} PI ${sessionId} ${message.slice(0, 200).replace(/\n/g, " ")}\n`).catch(() => {});
+      await appendFile(AUDIT, `${new Date().toISOString()} PI ${sessionId} ${AUDIT_BODIES ? message.slice(0, 200).replace(/\n/g, " ") : `${Buffer.byteLength(message)} bytes`}\n`).catch(() => {});
       send(res, { type: "start", cmd: "pi" });
       // No shell: args are passed as argv, so the message can never break out to the shell.
       streamChild(res, spawn("pi", ["--print", "--offline", "--session-id", sessionId, message], { env: piEnv(), stdio: ["ignore", "pipe", "pipe"] }));
@@ -357,7 +360,7 @@ const server = http.createServer((req, res) => {
         bundle = next;
         sources.push(sourceFor[i]);
       }
-      await appendFile(AUDIT, `${new Date().toISOString()} CTX ${counterpart || "-"} | ${(topic || goal || "").slice(0, 60)} | sources=${sources.map((source) => `${source.kind}:${source.n}`).join(",")}\n`).catch(() => {});
+      await appendFile(AUDIT, `${new Date().toISOString()} CTX ${AUDIT_BODIES ? `${counterpart || "-"} | ${(topic || goal || "").slice(0, 60)} | ` : ""}sources=${sources.map((source) => `${source.kind}:${source.n}`).join(",")}\n`).catch(() => {});
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(sources.length ? { ok: true, bundle, sources } : { ok: false, error: "no sources reachable or no matches" }));
     });
