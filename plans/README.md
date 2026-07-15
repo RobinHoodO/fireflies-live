@@ -27,7 +27,7 @@ touching out-of-scope files.
 | 007 | Cancel stale streaming reads | P3 | M | 001 | DONE |
 | 011 | Perf polish (debounce persistence, scope idle tick) | P3 | S | 001 (after 010) | DONE |
 | 012 | Minimize bridge audit-log content | P3 | S | 002 | DONE |
-| 013 | Fix actively-wrong docs (FEATURES, INTEGRATION_PLAN) | P3 | S | — (after 008) | TODO |
+| 013 | Fix actively-wrong docs (FEATURES, INTEGRATION_PLAN) | P3 | S | — (after 008) | DONE |
 | 014 | Bridge hardening (fail-closed key gate, symlink-safe rooting) | P3 | S | 002 | TODO |
 | 015 | Housekeeping (gitignore artifacts, surface dead-model errors) | P3 | S | — | TODO |
 

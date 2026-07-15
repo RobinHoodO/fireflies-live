@@ -1,7 +1,8 @@
 # Fireflies Live — Feature List
 
 Tracked feature inventory. Status: ✅ done · 🟡 in progress · ⬜ planned.
-See [ROADMAP.md](./ROADMAP.md) for phasing.
+**[ROADMAP.md](./ROADMAP.md) is the source of truth for status and phasing** — on
+any disagreement between the two files, trust the roadmap and fix this one.
 
 ## Transcription
 | Feature | Status | Notes |
@@ -18,11 +19,11 @@ See [ROADMAP.md](./ROADMAP.md) for phasing.
 ## AI assistant
 | Feature | Status | Notes |
 |---|---|---|
-| OpenRouter model picker | ✅ | 6 models, DeepSeek default |
+| OpenRouter model picker | ✅ | Grouped roster (~22), Claude Sonnet 5 default |
 | Real transcript-driven suggestions | ✅ | Throttled pulse |
 | Configurable pulse rate | ✅ | 8/12/20/30s / off |
 | Suggestion history feed (newest-first) | ✅ | Deduped, capped 100 |
-| Suggestion type filter (question/action/insight) | ✅ | Click to filter |
+| Suggestion type filter (ask/do/note/command) | ✅ | Click to filter |
 | Suggestion expand/collapse (show newest/most-relevant) | ✅ | Show more/less, ~5 default |
 | Question mode (live "say this" draft) | ✅ | Toggle; banner over transcript |
 | Agent-context preset modes | ✅ | Clickable chips |
@@ -30,7 +31,7 @@ See [ROADMAP.md](./ROADMAP.md) for phasing.
 | Custom agent context | ✅ | Textarea, fed to all calls |
 | Quick-action command palette | ✅ | Category filters |
 | Chat with the meeting | ✅ | Uses transcript context |
-| Rich markdown in AI output | ✅ | react-markdown + remark-gfm |
+| Rich markdown in AI output | ✅ | v2/md.ts renderer (react-markdown retired with v1) |
 | Relevance ranking (beyond recency) | ⬜ | Phase 5 |
 | Auto-actions (no-click execution) | ⬜ | Phase 5 |
 
@@ -45,8 +46,8 @@ See [ROADMAP.md](./ROADMAP.md) for phasing.
 | Export to Markdown | ✅ | Transcript + suggestions + chat |
 | AI-offline / key-missing state | ✅ | Note when OPENROUTER_API missing |
 | Granular OpenRouter model picker | ✅ | ~22 models, grouped optgroups |
-| Session persistence (localStorage) | ⬜ | Phase 2 |
-| Keyboard shortcuts | ⬜ | Phase 2 |
+| Session persistence (localStorage) | ✅ | Phase 2, shipped 2026-07-12 |
+| Keyboard shortcuts | ✅ | Phase 2, shipped 2026-07-12 (⌘1/2/3, ⌘K, ⌘U, ⌘J) |
 
 ## Platform / backend
 | Feature | Status | Notes |

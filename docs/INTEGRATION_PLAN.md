@@ -5,7 +5,7 @@ existing backend. Written for a **fresh session** to execute cheaply.
 
 ## The source file
 
-`~/Desktop/Fireflies Live (standalone).html` (~383 KB, 182 lines). It is a **bundled
+`Fireflies Live (standalone).html` at the repo root (~383 KB, 182 lines). It is a **bundled
 prototype export** ("Bundled Page"): the real UI is rendered at runtime by inline
 minified JS (Vue/React-ish), with an SVG thumbnail fallback. It has **no clean
 semantic ids/classes** to hook into (only `__bundler_*`). So you cannot "inject wiring"
