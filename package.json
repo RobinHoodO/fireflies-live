@@ -4,26 +4,18 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
-    "lint": "oxlint",
-    "preview": "vite preview",
+    "dev": "vite --config v2/vite.config.ts",
+    "build": "tsc -p tsconfig.v2.json --noEmit && vite build --config v2/vite.config.ts",
+    "lint": "oxlint v2 server",
+    "preview": "vite preview --config v2/vite.config.ts",
     "typecheck:v2": "tsc -p tsconfig.v2.json --noEmit",
-    "dev:v2": "vite --config v2/vite.config.ts",
-    "build:v2": "vite build --config v2/vite.config.ts",
-    "preview:v2": "vite preview --config v2/vite.config.ts",
     "test": "node --test",
-    "verify": "npm run typecheck:v2 && npm run lint && npm run test && npm run build:v2"
+    "verify": "npm run lint && npm run test && npm run build"
   },
   "dependencies": {
-    "@tailwindcss/vite": "^4.3.1",
-    "lucide-react": "^1.21.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
-    "react-markdown": "^10.1.0",
-    "remark-gfm": "^4.0.1",
-    "socket.io-client": "^4.8.3",
-    "tailwindcss": "^4.3.1"
+    "socket.io-client": "^4.8.3"
   },
   "devDependencies": {
     "@types/node": "^24.13.2",
