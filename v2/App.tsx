@@ -3,7 +3,7 @@
 // The mock data and local handlers are replaced with the real backend: Fireflies
 // meetings + live socket (demo fallback), OpenRouter suggestions/chat/answers, and
 // the localhost command bridge. See ./backend and v2/vite.config.ts.
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type Ref } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type Ref } from "react";
 import { Icon, IconSprite } from "./icons";
 import { mdToHtml } from "./md";
 import {
@@ -189,13 +189,16 @@ export default function App() {
     setStatus(mapped);
   };
 
-  const grouped = lines.reduce<Line[]>((acc, l) => {
+  const grouped = useMemo(() => lines.reduce<Line[]>((acc, l) => {
     const last = acc[acc.length - 1];
     if (last && last.speaker === l.speaker) acc[acc.length - 1] = { ...last, text: `${last.text} ${l.text}`, isFinal: l.isFinal };
     else acc.push({ ...l });
     return acc;
-  }, []);
-  const getCtx = () => grouped.map(l => `[${l.speaker}]: ${l.text}`).join("\n");
+  }, []), [lines]);
+  // Ref-backed so stale closures (memoized JSX handlers, async pulses) always
+  // read the live transcript.
+  const groupedRef = useRef(grouped); groupedRef.current = grouped;
+  const getCtx = () => groupedRef.current.map(l => `[${l.speaker}]: ${l.text}`).join("\n");
   const { ref: transcriptScrollRef, onScroll: onTranscriptScroll, stick: stickTranscript } = useStickToBottom();
   const { ref: chatPanelScrollRef, onScroll: onChatPanelScroll, stick: stickChatPanel } = useStickToBottom();
   const { ref: piPanelScrollRef, onScroll: onPiPanelScroll, stick: stickPiPanel } = useStickToBottom();
@@ -395,14 +398,17 @@ export default function App() {
 
   // ── transcript ingest ────────────────────────────────────────────
   const onTranscriptLine = (speaker: string, text: string, isFinal: boolean, key?: string) => {
+    // Cap retained lines at 500 (mirrors the restore-path cap) so late-meeting
+    // renders don't pay an ever-growing reduce + DOM diff.
+    const cap = (next: Line[]) => next.length > 500 ? next.slice(-500) : next;
     setLines(prev => {
       if (key != null) {
         const idx = prev.findIndex(l => l.id === key);
         if (idx >= 0) { const u = [...prev]; u[idx] = { ...u[idx], speaker, text, isFinal: true }; return u; }
-        return [...prev, { speaker, text, isFinal: true, id: key }];
+        return cap([...prev, { speaker, text, isFinal: true, id: key }]);
       }
       if (speaker === lastSpeakerRef.current && prev.length > 0 && !prev[prev.length - 1].isFinal) { const u = [...prev]; u[u.length - 1] = { ...u[u.length - 1], text, isFinal }; return u; }
-      lastSpeakerRef.current = speaker; lineCounter.current++; return [...prev, { speaker, text, isFinal, id: `l${lineCounter.current}` }];
+      lastSpeakerRef.current = speaker; lineCounter.current++; return cap([...prev, { speaker, text, isFinal, id: `l${lineCounter.current}` }]);
     });
   };
 
@@ -438,7 +444,7 @@ export default function App() {
   const selectMode = (id: string) => setMode(id);
   const toggleFlag = (k: string) => { if (k === "agenda") agendaSeqRef.current++; setFlags(f => ({ ...f, [k]: !f[k] })); };
   const suggestModes = async () => {
-    if (!orKey || grouped.length === 0) return;
+    if (!orKey || groupedRef.current.length === 0) return;
     setProposing(true);
     try { const ms = await proposeModes(getCtx(), orKey, model); if (ms.length) setSuggested(ms.map((m, i) => ({ id: `p${i}-${m.label}`, l: m.label, context: m.context }))); } catch {}
     setProposing(false);
@@ -595,6 +601,7 @@ export default function App() {
   // derived
   const isSplit = view === "split", isChat = view === "chat";
   const isConnected = status === "connected", isConnecting = status === "connecting", isIdle = status === "idle";
+  const hasTranscript = grouped.length > 0;
   const statusColor = isConnected ? "oklch(0.68 0.16 155)" : isConnecting ? "oklch(0.78 0.14 75)" : "oklch(0.7 0.01 250)";
   const statusLabel = isConnected ? "Connected" : isConnecting ? "Connecting…" : "Idle";
   const pct = Math.round(splitRatio * 1000) / 10 + "%";
@@ -602,13 +609,13 @@ export default function App() {
   const scriptCoverage = scriptWordCount ? scriptPointer / scriptWordCount : 0;
   const followingScript = isFollowingScript(scriptPointer, missStreak, scriptWordCount);
 
-  const filtered = sortFeedItems(suggestions.filter(x => filter === "all" ? true : x.type === filter), feedSort);
-  const counts: Record<string, number> = { ask: 0, do: 0, note: 0, command: 0 }; suggestions.forEach(x => counts[x.type]++);
+  const filtered = useMemo(() => sortFeedItems(suggestions.filter(x => filter === "all" ? true : x.type === filter), feedSort), [suggestions, filter, feedSort]);
+  const counts = useMemo(() => { const c: Record<string, number> = { ask: 0, do: 0, note: 0, command: 0 }; suggestions.forEach(x => c[x.type]++); return c; }, [suggestions]);
   const sidebarTabs = [...TABS, ...(flags.agenda ? [{ id: "agenda", l: "Agenda", ic: "i-bulb" }] : [])];
 
   const flagsCount = Object.values(flags).filter(Boolean).length;
-  const modeLabel = MODES.find(m => m.id === mode)?.l || suggested.find(s => s.id === mode)?.l || "No agent mode";
-  let modelLabel = ""; MODELS.forEach(g => g.items.forEach(i => { if (i.id === model) modelLabel = i.l; }));
+  const modeLabel = useMemo(() => MODES.find(m => m.id === mode)?.l || suggested.find(s => s.id === mode)?.l || "No agent mode", [mode, suggested]);
+  const modelLabel = useMemo(() => { let l = ""; MODELS.forEach(g => g.items.forEach(i => { if (i.id === model) l = i.l; })); return l; }, [model]);
   const activeMeetings = meetings.filter(m => m.active);
 
   const rootStyle = {
@@ -721,6 +728,22 @@ export default function App() {
   ); }
 
   // ── Transcript card ───────────────────────────────────────────────
+  // Memoized so a non-transcript state change (config keystroke, suggestion
+  // pulse, copied/filed flips) doesn't re-reconcile up to 500 line nodes.
+  const transcriptList = useMemo(() => (
+    <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+      {grouped.map(l => (
+        <div key={l.id}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, letterSpacing: "0.01em", marginBottom: 5, color: speakerColor(l.speaker) }}>{l.speaker}</div>
+          <div style={{ fontSize: 15.5, lineHeight: 1.7, color: "oklch(0.32 0.018 255)" }}>{l.text}{isConnected && !l.isFinal && <span style={{ display: "inline-block", width: 7, height: 16, background: "var(--ac)", borderRadius: 2, marginLeft: 4, verticalAlign: "middle", animation: "fl-blink 1.1s steps(1) infinite" }} />}</div>
+        </div>
+      ))}
+      {isConnected
+        ? <div style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 4, color: "oklch(0.7 0.012 255)", fontSize: 13 }}><span style={{ width: 7, height: 16, background: "var(--ac)", borderRadius: 2, animation: "fl-blink 1.1s steps(1) infinite", display: "inline-block" }} /><span>Listening…</span></div>
+        : <div style={{ fontSize: 13, color: "oklch(0.6 0.015 255)", paddingTop: 4 }}>Restored from your last session — connect to continue.</div>}
+    </div>
+  ), [grouped, isConnected]);
+
   const transcriptCard = (
     <div style={{ ...cardBase, flex: "1 1 auto", minWidth: 0 }}>
       <div style={{ padding: "24px 28px", display: "flex", alignItems: "center", gap: 18, flex: "0 0 auto", borderBottom: "1px solid oklch(0.95 0.005 250)" }}>
@@ -773,17 +796,7 @@ export default function App() {
                   : <div style={{ fontSize: 14, lineHeight: 1.6, color: "oklch(0.55 0.015 255)" }}>{answering ? "Formulating a response…" : "Listening — I'll draft what to say when someone asks you something."}</div>}
               </div>
             )}
-            <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
-              {grouped.map(l => (
-                <div key={l.id}>
-                  <div style={{ fontSize: 12.5, fontWeight: 700, letterSpacing: "0.01em", marginBottom: 5, color: speakerColor(l.speaker) }}>{l.speaker}</div>
-                  <div style={{ fontSize: 15.5, lineHeight: 1.7, color: "oklch(0.32 0.018 255)" }}>{l.text}{isConnected && !l.isFinal && <span style={{ display: "inline-block", width: 7, height: 16, background: "var(--ac)", borderRadius: 2, marginLeft: 4, verticalAlign: "middle", animation: "fl-blink 1.1s steps(1) infinite" }} />}</div>
-                </div>
-              ))}
-              {isConnected
-                ? <div style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 4, color: "oklch(0.7 0.012 255)", fontSize: 13 }}><span style={{ width: 7, height: 16, background: "var(--ac)", borderRadius: 2, animation: "fl-blink 1.1s steps(1) infinite", display: "inline-block" }} /><span>Listening…</span></div>
-                : <div style={{ fontSize: 13, color: "oklch(0.6 0.015 255)", paddingTop: 4 }}>Restored from your last session — connect to continue.</div>}
-            </div>
+            {transcriptList}
           </div>
         )}
         {isIdle && grouped.length === 0 && (
@@ -991,7 +1004,10 @@ export default function App() {
     </>
   );
 
-  const slideOver = configOpen && (
+  // Memoized so per-word transcript updates don't re-reconcile the config
+  // panel while it's open. Handlers inside read live data via refs/setState
+  // updaters; every state they render is in the dep list.
+  const slideOver = useMemo(() => configOpen && (
     <>
       <div onClick={() => setConfigOpen(false)} style={{ position: "fixed", inset: 0, background: "oklch(0.2 0.02 260 / 0.32)", zIndex: 90 }} />
       <div className="fl-scroll" style={{ position: "fixed", top: 0, right: 0, bottom: 0, width: 460, maxWidth: "92vw", background: "oklch(0.99 0.003 250)", borderLeft: `1px solid ${BORDER}`, boxShadow: "-24px 0 60px -30px rgba(16,24,40,.5)", zIndex: 91, overflowY: "auto", animation: "fl-slide .22s ease-out" }}>
@@ -1027,7 +1043,7 @@ export default function App() {
             <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
               {MODES.map(m => <button key={m.id} onClick={() => selectMode(m.id)} style={modeChip(mode === m.id)}>{m.l}</button>)}
             </div>
-            <button onClick={suggestModes} disabled={proposing || grouped.length === 0} style={{ marginTop: 14, display: "inline-flex", alignItems: "center", gap: 9, padding: "11px 16px", background: "var(--ac-tint)", border: "1px solid var(--ac-border)", borderRadius: 11, color: "var(--ac-text)", fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", opacity: proposing || grouped.length === 0 ? 0.55 : 1 }}><Icon id="i-sparkles" size={15} />{proposing ? "Reading…" : "Suggest from meeting"}</button>
+            <button onClick={suggestModes} disabled={proposing || !hasTranscript} style={{ marginTop: 14, display: "inline-flex", alignItems: "center", gap: 9, padding: "11px 16px", background: "var(--ac-tint)", border: "1px solid var(--ac-border)", borderRadius: 11, color: "var(--ac-text)", fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", opacity: proposing || !hasTranscript ? 0.55 : 1 }}><Icon id="i-sparkles" size={15} />{proposing ? "Reading…" : "Suggest from meeting"}</button>
             {suggested.length > 0 && (
               <select value={suggested.some(s => s.id === mode) ? mode : ""} onChange={e => { if (e.target.value) selectMode(e.target.value); }} className="fl-focus" style={{ marginTop: 12, width: "100%", appearance: "none", WebkitAppearance: "none", padding: "12px 38px 12px 16px", border: `1px solid ${BORDER}`, borderRadius: 11, background: "#fff url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E\") no-repeat right 14px center", fontFamily: "inherit", fontSize: 13.5, fontWeight: 600, color: "oklch(0.3 0.02 255)", cursor: "pointer", outline: "none" }}>
                 <option value="">Proposed modes…</option>
@@ -1073,7 +1089,7 @@ export default function App() {
         </div>
       </div>
     </>
-  );
+  ), [configOpen, goal, counterpartInput, topicInput, assembling, bridgeOnline, constellation, constellationError, mode, proposing, hasTranscript, suggested, customContext, fastModel, model, flags, orKey, bridgeToken]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="fl-scroll" style={rootStyle}>
