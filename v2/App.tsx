@@ -171,9 +171,14 @@ export default function App() {
   // Stable PI session id — reused across reloads so PI keeps conversation context.
   const piSessionRef = useRef<string>(SAVED.piSession || ("fl-" + Math.random().toString(36).slice(2, 10)));
 
-  // Persist config so it's consistent across sessions.
+  // Persist config so it's consistent across sessions. Debounced so goal /
+  // custom-context keystrokes coalesce into one write; pagehide flushes the
+  // pending value so a fast tab close can't lose the last keystrokes.
   useEffect(() => {
-    try { localStorage.setItem("fl-config", JSON.stringify({ view, mode, model, fastModel, flags, rate, questionMode, customContext, goal, piSession: piSessionRef.current })); } catch { /* storage unavailable */ }
+    const write = () => { try { localStorage.setItem("fl-config", JSON.stringify({ view, mode, model, fastModel, flags, rate, questionMode, customContext, goal, piSession: piSessionRef.current })); } catch { /* storage unavailable */ } };
+    const id = setTimeout(write, 400);
+    window.addEventListener("pagehide", write);
+    return () => { clearTimeout(id); window.removeEventListener("pagehide", write); };
   }, [view, mode, model, fastModel, flags, rate, questionMode, customContext, goal]);
 
   // derived context for the AI: selected mode + any custom note
@@ -225,7 +230,9 @@ export default function App() {
     ping(); const id = setInterval(ping, 5000);
     return () => { alive = false; clearInterval(id); };
   }, []);
-  useEffect(() => { const id = setInterval(() => force(n => n + 1), 5000); return () => clearInterval(id); }, []);
+  // 30s: only consumer is the rel() "2m ago" labels — 5s granularity bought
+  // nothing and re-rendered the tree 6× as often while idle.
+  useEffect(() => { const id = setInterval(() => force(n => n + 1), 30000); return () => clearInterval(id); }, []);
 
   // ── live suggestion pulse ────────────────────────────────────────
   const rateSecs = rate === "off" ? 0 : parseInt(rate, 10);
