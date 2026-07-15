@@ -4,7 +4,7 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import http from "node:http";
-import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { mkdtemp, rm, readFile, mkdir, writeFile } from "node:fs/promises";
 import { readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -12,12 +12,18 @@ import path from "node:path";
 const TOKEN = "test-token-" + Math.random().toString(36).slice(2);
 const PORT = 8799; // avoid the real 8787
 const base = `http://127.0.0.1:${PORT}`;
-let child, fileDir;
+let child, fileDir, clientsDir;
 
 before(async () => {
   fileDir = await mkdtemp(path.join(tmpdir(), "bridge-test-"));
+  // Two fixture client folders for the /context matching tests.
+  clientsDir = await mkdtemp(path.join(tmpdir(), "bridge-clients-"));
+  await mkdir(path.join(clientsDir, "Toniic"));
+  await writeFile(path.join(clientsDir, "Toniic", "notes.md"), "# Toniic prep");
+  await mkdir(path.join(clientsDir, "Acme-Website"));
+  await writeFile(path.join(clientsDir, "Acme-Website", "prep.md"), "# Acme prep");
   child = spawn("node", ["server/bridge.mjs"], {
-    env: { ...process.env, BRIDGE_TOKEN: TOKEN, BRIDGE_PORT: String(PORT), BRIDGE_FILE_DIR: fileDir },
+    env: { ...process.env, BRIDGE_TOKEN: TOKEN, BRIDGE_PORT: String(PORT), BRIDGE_FILE_DIR: fileDir, BRIDGE_CLIENTS_ROOT: clientsDir },
     stdio: "ignore",
   });
   let ready = false;
@@ -31,6 +37,7 @@ before(async () => {
 after(async () => {
   child?.kill();
   await rm(fileDir, { recursive: true, force: true });
+  await rm(clientsDir, { recursive: true, force: true });
 });
 
 const auth = { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" };
@@ -179,6 +186,31 @@ test("real transcripts dir untouched (test used temp dir)", () => {
 });
 
 // ---- /context ---------------------------------------------------------------
+
+// Folder matching: assert on the client section specifically — semsearch may be
+// up or down on the host, so overall ok/sources are not stable test signals.
+async function contextBundle(body) {
+  const r = await fetch(base + "/context", { method: "POST", headers: auth, body: JSON.stringify(body) });
+  assert.equal(r.status, 200);
+  const json = await r.json();
+  return json.bundle || "";
+}
+
+test("/context counterpart wins over generic goal word", async () => {
+  const bundle = await contextBundle({ counterpart: "Toniic", goal: "website creation" });
+  assert.ok(bundle.includes("📁 Client folder\nToniic"), "expected Toniic client section");
+  assert.ok(!bundle.includes("Acme-Website"), "generic goal word must not pull Acme-Website");
+});
+
+test("/context lone generic goal word selects no client folder", async () => {
+  const bundle = await contextBundle({ goal: "build a website" });
+  assert.ok(!bundle.includes("Client folder"), "goal-only generic word must select nothing");
+});
+
+test("/context counterpart resolves hyphenated folder", async () => {
+  const bundle = await contextBundle({ counterpart: "Acme Website" });
+  assert.ok(bundle.includes("📁 Client folder\nAcme-Website"), "expected Acme-Website client section");
+});
 
 test("/context empty request -> 400", async () => {
   const r = await fetch(base + "/context", { method: "POST", headers: auth, body: JSON.stringify({}) });

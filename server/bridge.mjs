@@ -24,7 +24,7 @@ const MAX_MS = 120_000;     // hard timeout per command
 const FILE_DIR = process.env.BRIDGE_FILE_DIR || "/Users/robinsverd/Thrivbe-AI/content/meetings/transcripts";
 const SEM = "http://127.0.0.1:3015/search";
 const CONTENT_ROOT = "/Users/robinsverd/Thrivbe-AI/content";
-const CLIENTS_ROOT = "/Users/robinsverd/Thrivbe-AI/clients";
+const CLIENTS_ROOT = process.env.BRIDGE_CLIENTS_ROOT || "/Users/robinsverd/Thrivbe-AI/clients";
 
 // Catastrophic patterns we refuse outright. Not a security boundary against a
 // determined operator (it's their machine) — a guard against fat-finger disasters.
@@ -265,11 +265,28 @@ const server = http.createServer((req, res) => {
       let client = null;
       {
         try {
-          // Match against counterpart, topic, AND goal — a client name typed only into
-          // the goal field (e.g. "Toniic website creation…") should still resolve.
-          const words = [counterpart, topic, goal].join(" ").toLowerCase().match(/[\p{L}\p{N}]+/gu)?.filter((word) => word.length > 3) || [];
+          // Counterpart (who the call is with) is the primary match source; topic/goal
+          // only fall back when it's empty. Whole-word token matches only — a generic
+          // goal word like "website" must never pull an unrelated client's private
+          // prep into this call's context. A lone goal word selects nothing: without
+          // a counterpart, only a topic token may pick a folder.
+          const norm = (s) => s.toLowerCase().match(/[\p{L}\p{N}]+/gu)?.filter((word) => word.length > 3) || [];
+          const idWords = norm(counterpart);
+          const candidateWords = idWords.length ? idWords : [...norm(topic), ...norm(goal)];
+          const counterpartLc = counterpart.toLowerCase();
           const folders = await readdir(CLIENTS_ROOT, { withFileTypes: true });
-          const folder = folders.find((entry) => entry.isDirectory() && words.some((word) => entry.name.toLowerCase().includes(word)));
+          const scoredFolders = folders
+            .filter((entry) => entry.isDirectory())
+            .map((entry) => {
+              const folderTokens = new Set(norm(entry.name));
+              const score = candidateWords.filter((word) => folderTokens.has(word)).length
+                + (counterpartLc && counterpartLc.includes(entry.name.toLowerCase()) ? 1 : 0);
+              return { entry, folderTokens, score };
+            })
+            .filter((c) => c.score > 0)
+            .sort((a, b) => b.score - a.score);
+          const best = scoredFolders[0];
+          const folder = best && (idWords.length || norm(topic).some((word) => best.folderTokens.has(word))) ? best.entry : undefined;
           if (folder) {
             const dirPath = rootedPath(CLIENTS_ROOT, folder.name);
             if (dirPath) {
