@@ -28,7 +28,7 @@ touching out-of-scope files.
 | 011 | Perf polish (debounce persistence, scope idle tick) | P3 | S | 001 (after 010) | DONE |
 | 012 | Minimize bridge audit-log content | P3 | S | 002 | DONE |
 | 013 | Fix actively-wrong docs (FEATURES, INTEGRATION_PLAN) | P3 | S | — (after 008) | DONE |
-| 014 | Bridge hardening (fail-closed key gate, symlink-safe rooting) | P3 | S | 002 | TODO |
+| 014 | Bridge hardening (fail-closed key gate, symlink-safe rooting) | P3 | S | 002 | DONE |
 | 015 | Housekeeping (gitignore artifacts, surface dead-model errors) | P3 | S | — | TODO |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (one-line reason) | REJECTED (one-line rationale).

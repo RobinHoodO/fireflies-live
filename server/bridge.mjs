@@ -12,7 +12,7 @@
 
 import http from "node:http";
 import { spawn } from "node:child_process";
-import { appendFile, writeFile, readFile, readdir, stat } from "node:fs/promises";
+import { appendFile, writeFile, readFile, readdir, stat, realpath } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 
@@ -68,9 +68,19 @@ async function semsearch(query, k, corpus) {
 }
 
 const scored = (rows) => rows.filter((row) => typeof row?.score === "number" && row.score >= 0.35);
-const rootedPath = (root, target) => {
+// Symlink-safe path rooting. First-level entries under a root may themselves be
+// operator-curated symlinks (e.g. clients/Katapult Future Fest -> ~/Katapult…),
+// so the check is: the target's REAL path must live inside the REAL path of its
+// first-level folder. A symlink planted deeper that points outside is rejected.
+const rootedPath = async (root, target) => {
   const resolved = path.resolve(root, target);
-  return resolved.startsWith(`${root}/`) ? resolved : "";
+  if (!resolved.startsWith(`${root}/`)) return "";
+  const firstSegment = resolved.slice(root.length + 1).split("/")[0];
+  try {
+    const baseReal = await realpath(path.join(root, firstSegment));
+    const real = await realpath(resolved);
+    return real === baseReal || real.startsWith(`${baseReal}/`) ? resolved : "";
+  } catch { return ""; } // nonexistent path — callers already treat "" as skip
 };
 
 // Per-session shared secret, injected by the Vite bridge plugin. Fail closed if absent.
@@ -255,7 +265,7 @@ const server = http.createServer((req, res) => {
       }
       const meetingFiles = [];
       for (const hitPath of meetingPaths) {
-        const fullPath = rootedPath(CONTENT_ROOT, hitPath);
+        const fullPath = await rootedPath(CONTENT_ROOT, hitPath);
         if (!fullPath) continue;
         try {
           const st = await stat(fullPath);
@@ -291,7 +301,7 @@ const server = http.createServer((req, res) => {
           const best = scoredFolders[0];
           const folder = best && (idWords.length || norm(topic).some((word) => best.folderTokens.has(word))) ? best.entry : undefined;
           if (folder) {
-            const dirPath = rootedPath(CLIENTS_ROOT, folder.name);
+            const dirPath = await rootedPath(CLIENTS_ROOT, folder.name);
             if (dirPath) {
               const entries = await readdir(dirPath, { withFileTypes: true });
               const names = entries.slice(0, 15).map((entry) => entry.name);
@@ -300,7 +310,7 @@ const server = http.createServer((req, res) => {
               const mdPaths = entries.filter((e) => e.isFile() && e.name.endsWith(".md")).map((e) => path.join(folder.name, e.name));
               for (const sub of entries.filter((e) => e.isDirectory())) {
                 try {
-                  const subEntries = await readdir(rootedPath(CLIENTS_ROOT, path.join(folder.name, sub.name)), { withFileTypes: true });
+                  const subEntries = await readdir(await rootedPath(CLIENTS_ROOT, path.join(folder.name, sub.name)), { withFileTypes: true });
                   for (const e of subEntries.filter((e) => e.isFile() && e.name.endsWith(".md"))) {
                     mdPaths.push(path.join(folder.name, sub.name, e.name));
                   }
@@ -309,7 +319,7 @@ const server = http.createServer((req, res) => {
 
               const files = [];
               for (const relPath of mdPaths.slice(0, 8)) {
-                const fullPath = rootedPath(CLIENTS_ROOT, relPath);
+                const fullPath = await rootedPath(CLIENTS_ROOT, relPath);
                 if (!fullPath) continue;
                 try {
                   const st = await stat(fullPath);

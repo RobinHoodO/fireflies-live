@@ -20,8 +20,9 @@ function firefliesKeyPlugin() {
         const host = String(req.headers.host || "");
         const sfs = req.headers["sec-fetch-site"];
         const loopbackHost = host === "localhost:5173" || host === "127.0.0.1:5173";
-        const crossOrigin = sfs && sfs !== "same-origin" && sfs !== "none";
-        if (!loopbackHost || crossOrigin) { res.statusCode = 403; res.end("forbidden"); return; }
+        // Fail closed: an ABSENT sec-fetch-site is denied too, not just a foreign one.
+        const sameOrigin = sfs === "same-origin" || sfs === "none";
+        if (!loopbackHost || !sameOrigin) { res.statusCode = 403; res.end("forbidden"); return; }
         try {
           const env = fs.readFileSync(path.resolve("/Users/robinsverd/Thrivbe-AI/.env"), "utf-8");
           // Line-anchored so a prefixed decoy (EXTRA_FIREFLY_API_KEY=) can't match,

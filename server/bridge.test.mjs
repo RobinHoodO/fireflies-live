@@ -4,7 +4,7 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import http from "node:http";
-import { mkdtemp, rm, readFile, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, readFile, mkdir, writeFile, symlink } from "node:fs/promises";
 import { readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -12,7 +12,7 @@ import path from "node:path";
 const TOKEN = "test-token-" + Math.random().toString(36).slice(2);
 const PORT = 8799; // avoid the real 8787
 const base = `http://127.0.0.1:${PORT}`;
-let child, fileDir, clientsDir;
+let child, fileDir, clientsDir, outsideDir;
 
 before(async () => {
   fileDir = await mkdtemp(path.join(tmpdir(), "bridge-test-"));
@@ -22,6 +22,10 @@ before(async () => {
   await writeFile(path.join(clientsDir, "Toniic", "notes.md"), "# Toniic prep");
   await mkdir(path.join(clientsDir, "Acme-Website"));
   await writeFile(path.join(clientsDir, "Acme-Website", "prep.md"), "# Acme prep");
+  // Symlink fixture: a deep symlink escaping the root must never be read.
+  outsideDir = await mkdtemp(path.join(tmpdir(), "bridge-outside-"));
+  await writeFile(path.join(outsideDir, "secret.md"), "# SYMLINK-ESCAPE-SECRET");
+  await symlink(path.join(outsideDir, "secret.md"), path.join(clientsDir, "Toniic", "leak.md"));
   child = spawn("node", ["server/bridge.mjs"], {
     env: { ...process.env, BRIDGE_TOKEN: TOKEN, BRIDGE_PORT: String(PORT), BRIDGE_FILE_DIR: fileDir, BRIDGE_CLIENTS_ROOT: clientsDir, BRIDGE_AUDIT_FILE: path.join(fileDir, "audit.log") },
     stdio: "ignore",
@@ -38,6 +42,7 @@ after(async () => {
   child?.kill();
   await rm(fileDir, { recursive: true, force: true });
   await rm(clientsDir, { recursive: true, force: true });
+  await rm(outsideDir, { recursive: true, force: true });
 });
 
 const auth = { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" };
@@ -217,6 +222,12 @@ test("/context lone generic goal word selects no client folder", async () => {
 test("/context counterpart resolves hyphenated folder", async () => {
   const bundle = await contextBundle({ counterpart: "Acme Website" });
   assert.ok(bundle.includes("📁 Client folder\nAcme-Website"), "expected Acme-Website client section");
+});
+
+test("/context blocks a deep symlink escaping the clients root", async () => {
+  const bundle = await contextBundle({ counterpart: "Toniic" });
+  assert.ok(bundle.includes("Toniic prep"), "regular file should still be read");
+  assert.ok(!bundle.includes("SYMLINK-ESCAPE-SECRET"), "symlinked-out file content must not leak into the bundle");
 });
 
 test("/context empty request -> 400", async () => {
