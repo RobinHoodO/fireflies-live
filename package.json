@@ -7,7 +7,13 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "typecheck:v2": "tsc -p tsconfig.v2.json --noEmit",
+    "dev:v2": "vite --config v2/vite.config.ts",
+    "build:v2": "vite build --config v2/vite.config.ts",
+    "preview:v2": "vite preview --config v2/vite.config.ts",
+    "test": "node --test",
+    "verify": "npm run typecheck:v2 && npm run lint && npm run test && npm run build:v2"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.1",
