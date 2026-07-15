@@ -20,7 +20,7 @@ touching out-of-scope files.
 | 004 | Gate transcript-derived commands before `/pi` (+ `/pi` denylist) | P1 | M | 002 | DONE |
 | 005 | Stop `/context` leaking the wrong client's docs | P1 | M | 002 | DONE |
 | 003 | Test the pure LLM-output validators + md escaper | P2 | M | 001 | DONE |
-| 006 | Four correctness fixes (env regex, pulse race, clean-boot agenda, map leak) | P2 | S | 001 | TODO |
+| 006 | Four correctness fixes (env regex, pulse race, clean-boot agenda, map leak) | P2 | S | 001 | DONE |
 | 008 | Retire legacy v1 app + drop 5 deps | P2 | M | 001 | TODO |
 | 009 | Root CLAUDE.md for agent onboarding | P2 | S | 001, 008 | TODO |
 | 010 | Stop re-rendering whole app per streamed word | P2 | M | 001 (after 006) | TODO |

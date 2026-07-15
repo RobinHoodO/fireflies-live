@@ -120,7 +120,9 @@ export default function App() {
     .map((s: any) => ({ id: s.id, type: s.type, text: s.text, t: s.t, ...(s.status === "done" ? { status: "done" as const } : {}), ...(s.outcome !== undefined ? { outcome: String(s.outcome) } : {}) }))
     : []);
   const [agenda, setAgenda] = useState<AgendaItem[]>(() => {
-    const saved = Array.isArray(SESSION.agenda) ? SESSION.agenda : SAVED.agenda;
+    // Agenda is a meeting artifact: restore only from the session blob (cleared
+    // on boot) — never from fl-config, so a fresh boot opens clean by design.
+    const saved = SESSION.agenda;
     const items = Array.isArray(saved) ? saved
       .filter((item: any) => item && typeof item.id === "number" && typeof item.text === "string" && typeof item.t === "number" && typeof item.votes === "number" && (item.source === "ai" || item.source === "you") && (item.status === undefined || item.status === "done"))
       .map((item: any) => ({ id: item.id, text: item.text, kind: (item.kind === "clarify" || item.kind === "branch" ? item.kind : "topic") as AgendaKind, t: item.t, votes: item.votes, source: item.source as "ai" | "you", ...(item.status === "done" ? { status: "done" as const } : {}) }))
@@ -154,7 +156,7 @@ export default function App() {
   const splitElRef = useRef<HTMLDivElement>(null);
   const chatComposerRef = useRef<HTMLTextAreaElement>(null);
   const connRef = useRef<{ connect: () => Promise<void>; disconnect: () => void } | null>(null);
-  const lastSpeakerRef = useRef(""); const lineCounter = useRef(0); const lastSuggestRef = useRef(0); const lastAnswerRef = useRef(0);
+  const lastSpeakerRef = useRef(""); const lineCounter = useRef(0); const lastSuggestRef = useRef(0); const suggestSeqRef = useRef(0); const lastAnswerRef = useRef(0);
   const suggestionsRef = useRef<Suggestion[]>([]); suggestionsRef.current = suggestions;
   const agendaRef = useRef<AgendaItem[]>([]); agendaRef.current = agenda;
   const answerSeqRef = useRef(0);
@@ -170,8 +172,8 @@ export default function App() {
 
   // Persist config so it's consistent across sessions.
   useEffect(() => {
-    try { localStorage.setItem("fl-config", JSON.stringify({ view, mode, model, fastModel, flags, rate, questionMode, customContext, goal, piSession: piSessionRef.current, agenda })); } catch { /* storage unavailable */ }
-  }, [view, mode, model, fastModel, flags, rate, questionMode, customContext, goal, agenda]);
+    try { localStorage.setItem("fl-config", JSON.stringify({ view, mode, model, fastModel, flags, rate, questionMode, customContext, goal, piSession: piSessionRef.current })); } catch { /* storage unavailable */ }
+  }, [view, mode, model, fastModel, flags, rate, questionMode, customContext, goal]);
 
   // derived context for the AI: selected mode + any custom note
   const modeCtx = MODE_CONTEXT[mode] ?? suggested.find(s => s.id === mode)?.context ?? "";
@@ -228,9 +230,11 @@ export default function App() {
     const now = Date.now();
     if (now - lastSuggestRef.current < rateSecs * 1000) return;
     lastSuggestRef.current = now;
+    const seq = ++suggestSeqRef.current;
     const ctx = lines.slice(-40).map(l => `[${l.speaker}]: ${l.text}`).join("\n");
     const existing = suggestionsRef.current.slice(0, 10).map(s => ({ id: s.id, type: s.type as any, text: s.text, done: s.status === "done" }));
     fetchSuggestions(ctx, orKey, pulseContext, fastModel, existing).then(items => {
+      if (seq !== suggestSeqRef.current) return; // stale response, drop
       if (!items.length) return;
       setSuggestions(prev => {
         const next = [...prev];
@@ -318,6 +322,12 @@ export default function App() {
       missStreakRef.current = misses;
       setMissStreak(prev => prev === misses ? prev : misses);
     }
+    // Prune consumption entries for lines no longer retained (lines is capped;
+    // without this the map grows one entry per line for the whole session).
+    if (consumedTranscriptWordsRef.current.size > lines.length) {
+      const live = new Set(lines.map(l => l.id));
+      for (const id of consumedTranscriptWordsRef.current.keys()) if (!live.has(id)) consumedTranscriptWordsRef.current.delete(id);
+    }
   }, [lines, questionMode]);
 
   // ── question-mode live answer ────────────────────────────────────
@@ -400,7 +410,7 @@ export default function App() {
     connRef.current?.disconnect();
     const meeting = m ?? selectedMeeting;
     if (m) setSelectedMeeting(m);
-    setLines([]); setSuggestions([]); setSentiments([]); setAgenda([]); setAgendaInput(""); setLiveAnswer(""); setPendingCmd(null); setNavFrame(null); navSeqRef.current++; setNavBusy(false); lastNavRef.current = 0; sentimentSeqRef.current++; lastSentimentRef.current = 0; agendaSeqRef.current++; lastAgendaRef.current = 0; agendaIdRef.current = 1; liveAnswerRef.current = ""; scriptWordsRef.current = []; consumedTranscriptWordsRef.current.clear(); scriptPointerRef.current = 0; missStreakRef.current = 0; setScriptPointer(prev => prev === 0 ? prev : 0); setMissStreak(prev => prev === 0 ? prev : 0); lastSpeakerRef.current = ""; lineCounter.current = 0;
+    setLines([]); setSuggestions([]); setSentiments([]); setAgenda([]); setAgendaInput(""); setLiveAnswer(""); setPendingCmd(null); setNavFrame(null); navSeqRef.current++; suggestSeqRef.current++; setNavBusy(false); lastNavRef.current = 0; sentimentSeqRef.current++; lastSentimentRef.current = 0; agendaSeqRef.current++; lastAgendaRef.current = 0; agendaIdRef.current = 1; liveAnswerRef.current = ""; scriptWordsRef.current = []; consumedTranscriptWordsRef.current.clear(); scriptPointerRef.current = 0; missStreakRef.current = 0; setScriptPointer(prev => prev === 0 ? prev : 0); setMissStreak(prev => prev === 0 ? prev : 0); lastSpeakerRef.current = ""; lineCounter.current = 0;
     try { localStorage.removeItem("fl-session"); } catch { /* storage unavailable */ }
     connRef.current = (ffKey && meeting) ? connectLive(onTranscriptLine, setStatusMapped, ffKey, meeting.id) : connectDemo(onTranscriptLine, setStatusMapped);
     connRef.current.connect();

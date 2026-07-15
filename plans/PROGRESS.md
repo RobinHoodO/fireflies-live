@@ -30,6 +30,12 @@ every commit: 36 tests, 0 fail, v2 typecheck + lint + build passing.
 - `tsconfig.v2.tsbuildinfo` is a new untracked build artifact (from `tsc -b`) —
   plan 015 (housekeeping/gitignore) will catch it.
 
+## Shipped (plans 006–015, second pass 2026-07-15)
+
+| Plan | Commit | What shipped |
+|------|--------|--------------|
+| 006 | _(see git log)_ | Four correctness fixes: line-anchored + quote-stripping `.env` key extraction in both vite configs (`readKey`); `suggestSeqRef` staleness guard on the suggestion pulse (bumped on reconnect); agenda no longer persisted in `fl-config` and restored only from the session blob (clean boot by design); karaoke `consumedTranscriptWordsRef` pruned to live line ids. Browser-verified: keys resolve unquoted, fresh boot writes agenda-free config. |
+
 ## Left in the queue (per plans/README.md order)
 
 Security/tests P1 are done. Remaining: 006 (correctness bundle) → 008 (retire

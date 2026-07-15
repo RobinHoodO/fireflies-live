@@ -30,10 +30,12 @@ function firefliesKeyPlugin() {
         try {
           const envPath = path.resolve('/Users/robinsverd/Thrivbe-AI/.env')
           const env = fs.readFileSync(envPath, 'utf-8')
-          const ffMatch = env.match(/FIREFLY_API_KEY=(.+)/)
-          const orMatch = env.match(/OPENROUTER_API=(.+)/)
-          const ffKey = ffMatch ? ffMatch[1].trim() : ''
-          const orKey = orMatch ? orMatch[1].trim() : ''
+          const readKey = (name: string) => {
+            const m = env.match(new RegExp(`^${name}=(.*)$`, 'm'))
+            return m ? m[1].trim().replace(/^["']|["']$/g, '').trim() : ''
+          }
+          const ffKey = readKey('FIREFLY_API_KEY')
+          const orKey = readKey('OPENROUTER_API')
           res.setHeader('Content-Type', 'application/json')
           res.end(JSON.stringify({ ffKey, orKey, bridgeToken }))
         } catch {

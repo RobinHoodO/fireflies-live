@@ -24,10 +24,14 @@ function firefliesKeyPlugin() {
         if (!loopbackHost || crossOrigin) { res.statusCode = 403; res.end("forbidden"); return; }
         try {
           const env = fs.readFileSync(path.resolve("/Users/robinsverd/Thrivbe-AI/.env"), "utf-8");
-          const ffMatch = env.match(/FIREFLY_API_KEY=(.+)/);
-          const orMatch = env.match(/OPENROUTER_API=(.+)/);
+          // Line-anchored so a prefixed decoy (EXTRA_FIREFLY_API_KEY=) can't match,
+          // and surrounding quotes are stripped.
+          const readKey = (name: string) => {
+            const m = env.match(new RegExp(`^${name}=(.*)$`, "m"));
+            return m ? m[1].trim().replace(/^["']|["']$/g, "").trim() : "";
+          };
           res.setHeader("Content-Type", "application/json");
-          res.end(JSON.stringify({ ffKey: ffMatch ? ffMatch[1].trim() : "", orKey: orMatch ? orMatch[1].trim() : "", bridgeToken }));
+          res.end(JSON.stringify({ ffKey: readKey("FIREFLY_API_KEY"), orKey: readKey("OPENROUTER_API"), bridgeToken }));
         } catch {
           res.setHeader("Content-Type", "application/json");
           res.end(JSON.stringify({ ffKey: "", orKey: "", bridgeToken }));
