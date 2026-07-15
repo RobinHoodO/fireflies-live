@@ -16,7 +16,7 @@ touching out-of-scope files.
 | Plan | Title | Priority | Effort | Depends on | Status |
 |------|-------|----------|--------|------------|--------|
 | 001 | Verification baseline (v2 typecheck + `node --test` + `npm run verify`) | P1 | S | — | DONE |
-| 002 | Freeze bridge security guards as tests | P1 | M | 001 | TODO |
+| 002 | Freeze bridge security guards as tests | P1 | M | 001 | DONE |
 | 004 | Gate transcript-derived commands before `/pi` (+ `/pi` denylist) | P1 | M | 002 | TODO |
 | 005 | Stop `/context` leaking the wrong client's docs | P1 | M | 002 | TODO |
 | 003 | Test the pure LLM-output validators + md escaper | P2 | M | 001 | TODO |
