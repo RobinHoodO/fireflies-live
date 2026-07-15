@@ -25,3 +25,8 @@ dist-ssr
 
 # bridge audit log
 server/audit.log
+
+# local artifacts
+.playwright-mcp/
+after-spacing.png
+*.tsbuildinfo

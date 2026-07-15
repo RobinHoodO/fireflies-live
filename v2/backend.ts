@@ -110,8 +110,12 @@ export async function callAI(messages: { role: string; content: string }[], key:
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", "HTTP-Referer": "http://localhost:5173", "X-Title": "Fireflies Live" },
     body: JSON.stringify({ model, messages, max_tokens: maxTokens, temperature: 0.7 }),
   });
-  const d = await r.json();
-  return d?.choices?.[0]?.message?.content || "Couldn't generate a response.";
+  const d = await r.json().catch(() => null);
+  const content = d?.choices?.[0]?.message?.content;
+  if (content) return content;
+  // Name the model + status so a stale hardcoded slug is diagnosable from the UI.
+  const detail = d?.error?.message ? `: ${String(d.error.message).slice(0, 120)}` : "";
+  return `⚠ Model "${model}" returned no response (HTTP ${r.status})${detail}. It may be an invalid slug.`;
 }
 
 export async function fetchNavFrame(ctx: string, key: string, goal: string, bundleHint: string, model: string): Promise<NavFrame | null> {
