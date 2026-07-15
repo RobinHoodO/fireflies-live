@@ -35,6 +35,7 @@ every commit: 36 tests, 0 fail, v2 typecheck + lint + build passing.
 | Plan | Commit | What shipped |
 |------|--------|--------------|
 | 008 | _(see git log)_ | Legacy v1 retired: deleted `src/`, root `index.html`, root `vite.config.ts`, `tsconfig.app.json`; dropped `react-markdown`, `remark-gfm`, `lucide-react`, `tailwindcss`, `@tailwindcss/vite`. Default `dev`/`build`/`preview` now target v2 (`--config v2/vite.config.ts`); `build` typechecks v2; `verify` = lint + test + build (build includes the typecheck, so no double pass); `:v2` dev/build/preview aliases removed, `typecheck:v2` kept. `tsconfig.node.json` repointed at `v2/vite.config.ts`. Only `src/` mention left is a provenance comment in `v2/backend.ts`. |
+| 009 | _(see git log)_ | Root `CLAUDE.md` (52 lines, pointer-first): active app = v2 (src/ deleted), real run/verify commands (each executed and confirmed), bridge security invariants + pointer to `bridge.test.mjs` as the regression net, env key names/location only, inline-style + delegation conventions. |
 | 006 | _(see git log)_ | Four correctness fixes: line-anchored + quote-stripping `.env` key extraction in both vite configs (`readKey`); `suggestSeqRef` staleness guard on the suggestion pulse (bumped on reconnect); agenda no longer persisted in `fl-config` and restored only from the session blob (clean boot by design); karaoke `consumedTranscriptWordsRef` pruned to live line ids. Browser-verified: keys resolve unquoted, fresh boot writes agenda-free config. |
 
 ## Left in the queue (per plans/README.md order)
