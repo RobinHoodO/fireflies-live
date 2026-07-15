@@ -187,6 +187,17 @@ const server = http.createServer((req, res) => {
       // Session id is the only value that lands in argv besides the message; keep it strict.
       if (!/^[A-Za-z0-9._-]{1,64}$/.test(sessionId)) { send(res, { type: "err", data: "bad session id" }); send(res, { type: "exit", code: 1 }); res.end(); return; }
 
+      // Same catastrophic-pattern guard as /run: PI messages can carry
+      // transcript-derived commands, so they get no weaker a gate.
+      const bad = denied(message);
+      if (bad) {
+        await appendFile(AUDIT, `${new Date().toISOString()} PI-BLOCKED ${sessionId} ${message.slice(0, 120).replace(/\n/g, " ")}\n`).catch(() => {});
+        send(res, { type: "err", data: `Blocked by guardrail (${bad}). Refused.` });
+        send(res, { type: "exit", code: 126 });
+        res.end();
+        return;
+      }
+
       await appendFile(AUDIT, `${new Date().toISOString()} PI ${sessionId} ${message.slice(0, 200).replace(/\n/g, " ")}\n`).catch(() => {});
       send(res, { type: "start", cmd: "pi" });
       // No shell: args are passed as argv, so the message can never break out to the shell.

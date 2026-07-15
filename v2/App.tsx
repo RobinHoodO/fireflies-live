@@ -143,6 +143,7 @@ export default function App() {
   const [missStreak, setMissStreak] = useState(0);
   const [copied, setCopied] = useState(false);
   const [filed, setFiled] = useState<"idle" | "filing" | "done" | "error">("idle");
+  const [pendingCmd, setPendingCmd] = useState<string | null>(null);
   const [navFrame, setNavFrame] = useState<NavFrame | null>(() => {
     const n = SESSION.navFrame;
     return n && typeof n === "object" && ["phase", "stance", "goal_progress", "next_move", "risk"].every(k => typeof n[k] === "string") ? n : null;
@@ -399,7 +400,7 @@ export default function App() {
     connRef.current?.disconnect();
     const meeting = m ?? selectedMeeting;
     if (m) setSelectedMeeting(m);
-    setLines([]); setSuggestions([]); setSentiments([]); setAgenda([]); setAgendaInput(""); setLiveAnswer(""); setNavFrame(null); navSeqRef.current++; setNavBusy(false); lastNavRef.current = 0; sentimentSeqRef.current++; lastSentimentRef.current = 0; agendaSeqRef.current++; lastAgendaRef.current = 0; agendaIdRef.current = 1; liveAnswerRef.current = ""; scriptWordsRef.current = []; consumedTranscriptWordsRef.current.clear(); scriptPointerRef.current = 0; missStreakRef.current = 0; setScriptPointer(prev => prev === 0 ? prev : 0); setMissStreak(prev => prev === 0 ? prev : 0); lastSpeakerRef.current = ""; lineCounter.current = 0;
+    setLines([]); setSuggestions([]); setSentiments([]); setAgenda([]); setAgendaInput(""); setLiveAnswer(""); setPendingCmd(null); setNavFrame(null); navSeqRef.current++; setNavBusy(false); lastNavRef.current = 0; sentimentSeqRef.current++; lastSentimentRef.current = 0; agendaSeqRef.current++; lastAgendaRef.current = 0; agendaIdRef.current = 1; liveAnswerRef.current = ""; scriptWordsRef.current = []; consumedTranscriptWordsRef.current.clear(); scriptPointerRef.current = 0; missStreakRef.current = 0; setScriptPointer(prev => prev === 0 ? prev : 0); setMissStreak(prev => prev === 0 ? prev : 0); lastSpeakerRef.current = ""; lineCounter.current = 0;
     try { localStorage.removeItem("fl-session"); } catch { /* storage unavailable */ }
     connRef.current = (ffKey && meeting) ? connectLive(onTranscriptLine, setStatusMapped, ffKey, meeting.id) : connectDemo(onTranscriptLine, setStatusMapped);
     connRef.current.connect();
@@ -488,11 +489,15 @@ export default function App() {
   };
   const submitPI = () => { const v = piInput.trim(); if (v) { setPiInput(""); sendPI(v); } };
 
-  // Ask / Do / Note → meeting chat (has transcript context); Command → PI terminal.
+  // Ask / Do / Note → meeting chat (has transcript context); Command → confirm
+  // first: the text is transcript-derived (untrusted speakers) and /pi runs with
+  // bash/write access, so it must never execute on a single click.
   const handleSuggestion = (s: Suggestion) => {
-    if (s.type === "command") sendPI(s.text);
+    if (s.type === "command") setPendingCmd(s.text);
     else askChat(s.text);
   };
+  const confirmPendingCmd = () => { if (pendingCmd) { const c = pendingCmd; setPendingCmd(null); sendPI(c); } };
+  const cancelPendingCmd = () => setPendingCmd(null);
   const toggleAgendaItem = (id: number) => {
     agendaSeqRef.current++;
     setAgenda(prev => sinkDoneAgenda(prev.map(item => {
@@ -959,6 +964,23 @@ export default function App() {
   );
 
   // ── Config slide-over ─────────────────────────────────────────────
+  // Confirm gate for transcript-derived commands. Cancel is the default/safe
+  // action (autoFocus), so Enter never auto-runs the command.
+  const cmdConfirm = pendingCmd !== null && (
+    <>
+      <div onClick={cancelPendingCmd} style={{ position: "fixed", inset: 0, background: "oklch(0.2 0.02 260 / 0.32)", zIndex: 95 }} />
+      <div role="alertdialog" aria-label="Confirm command" style={{ position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: 520, maxWidth: "92vw", background: "oklch(0.99 0.003 250)", border: `1px solid ${BORDER}`, borderRadius: 16, boxShadow: "0 24px 60px -20px rgba(16,24,40,.45)", zIndex: 96, padding: "24px 26px", display: "flex", flexDirection: "column", gap: 14 }}>
+        <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 16, fontWeight: 700, color: "oklch(0.27 0.025 255)" }}>⚠ Run this command from the meeting on your machine?</div>
+        <pre style={{ margin: 0, fontFamily: "JetBrains Mono,monospace", fontSize: 12.5, background: "oklch(0.96 0.008 250)", padding: "12px 14px", borderRadius: 10, whiteSpace: "pre-wrap", wordBreak: "break-all", color: "oklch(0.3 0.02 255)" }}>{pendingCmd}</pre>
+        <div style={{ fontSize: 12.5, lineHeight: 1.55, color: "oklch(0.5 0.02 255)" }}>This suggestion was generated from live transcript text — words spoken by meeting participants — and runs with bash/write access via the PI agent.</div>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+          <button autoFocus onClick={cancelPendingCmd} className="fl-hover-soft" style={{ padding: "10px 16px", background: "#fff", border: `1px solid ${BORDER}`, borderRadius: 11, color: "oklch(0.35 0.02 255)", fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Cancel</button>
+          <button onClick={confirmPendingCmd} style={{ padding: "10px 16px", background: "oklch(0.55 0.16 25)", border: "1px solid oklch(0.5 0.16 25)", borderRadius: 11, color: "#fff", fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Run command</button>
+        </div>
+      </div>
+    </>
+  );
+
   const slideOver = configOpen && (
     <>
       <div onClick={() => setConfigOpen(false)} style={{ position: "fixed", inset: 0, background: "oklch(0.2 0.02 260 / 0.32)", zIndex: 90 }} />
@@ -1065,6 +1087,7 @@ export default function App() {
         </div>
       </div>
       {slideOver}
+      {cmdConfirm}
     </div>
   );
 }
