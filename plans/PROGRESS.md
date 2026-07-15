@@ -45,9 +45,36 @@ every commit: 36 tests, 0 fail, v2 typecheck + lint + build passing.
 | 009 | _(see git log)_ | Root `CLAUDE.md` (52 lines, pointer-first): active app = v2 (src/ deleted), real run/verify commands (each executed and confirmed), bridge security invariants + pointer to `bridge.test.mjs` as the regression net, env key names/location only, inline-style + delegation conventions. |
 | 006 | _(see git log)_ | Four correctness fixes: line-anchored + quote-stripping `.env` key extraction in both vite configs (`readKey`); `suggestSeqRef` staleness guard on the suggestion pulse (bumped on reconnect); agenda no longer persisted in `fl-config` and restored only from the session blob (clean boot by design); karaoke `consumedTranscriptWordsRef` pruned to live line ids. Browser-verified: keys resolve unquoted, fresh boot writes agenda-free config. |
 
-## Left in the queue (per plans/README.md order)
+## Final summary (2026-07-15)
 
-Security/tests P1 are done. Remaining: 006 (correctness bundle) → 008 (retire
-v1) → 009 (CLAUDE.md) → 010 (render perf, after 006) → 003-follow-ups none →
-007, 011, 012, 013, 014, 015 (P3 polish, any order). Deferred: TS 6→7 bump
-after 008.
+**All 15 plans are DONE.** Two passes, all on `main`, one conventional commit
+per plan, `npm run verify` green at every commit — 38 tests / 0 failures at
+HEAD, v2 typechecked, lint + build passing.
+
+What the repo looks like now vs. commit `43c51bd`:
+
+- **One app.** v1 (`src/`) is gone; `npm run dev`/`build`/`preview` target v2;
+  5 dead deps dropped. `CLAUDE.md` onboards agents in 52 lines.
+- **A real gate.** `npm run verify` = lint + `node --test` + typechecked build.
+  38 tests pin the bridge guards (auth/Host/JSON/denylist/slug/symlink-escape/
+  audit-minimization), the `/context` folder matching, the LLM-output parsers,
+  and the markdown escaper.
+- **Safer during-meeting surface.** Transcript-derived commands confirm before
+  running and `/pi` enforces the denylist; `/context` can't pull the wrong
+  client's docs; the key endpoint fails closed; path rooting is symlink-safe;
+  the audit log stores metadata, not meeting content, by default.
+- **Correct + fast hot path.** Env-key parsing, pulse race, clean-boot agenda,
+  and the karaoke map leak fixed; transcript capped at 500 lines with memoized
+  derived values and subtrees; stale answer streams actually aborted; config
+  writes debounced with a pagehide flush; idle tick 6× cheaper.
+- **Docs true again.** FEATURES.md / INTEGRATION_PLAN.md corrected; ROADMAP.md
+  declared the single source of truth.
+
+Deferred (recorded, not planned): TypeScript 6→7 bump (run `npm run verify`
+after; v1 no longer in the way), OpenRouter `/models` roster auto-fetch, audit
+log rotation, PI-stream supersede-abort wiring, and the roadmap's kernel-side
+retrieval (6.3/7.4) which supersedes several of these interim guards.
+
+Operator note: restart `npm run dev` when convenient — the long-running bridge
+child predates the `/pi` denylist, `/context` matching fix, audit minimization,
+and symlink-safe rooting (the Vite/UI side hot-reloaded throughout).
