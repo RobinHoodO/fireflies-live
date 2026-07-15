@@ -160,6 +160,7 @@ export default function App() {
   const suggestionsRef = useRef<Suggestion[]>([]); suggestionsRef.current = suggestions;
   const agendaRef = useRef<AgendaItem[]>([]); agendaRef.current = agenda;
   const answerSeqRef = useRef(0);
+  const answerAbortRef = useRef<AbortController | null>(null);
   const lastNavRef = useRef(0); const navSeqRef = useRef(0);
   const lastSentimentRef = useRef(0); const sentimentSeqRef = useRef(0);
   const lastAgendaRef = useRef(0); const agendaSeqRef = useRef(0); const agendaIdRef = useRef(Math.max(0, ...agenda.map(item => item.id)) + 1);
@@ -334,8 +335,13 @@ export default function App() {
   }, [lines, questionMode]);
 
   // ── question-mode live answer ────────────────────────────────────
+  // Abort discipline: a stream is cancelled when question mode turns off, when a
+  // newer stream supersedes it, or on unmount — NOT on every effect re-run (the
+  // effect fires per streamed word; aborting in its cleanup would kill every
+  // stream one word after it starts).
+  useEffect(() => () => answerAbortRef.current?.abort(), []);
   useEffect(() => {
-    if (!questionMode || !orKey || lines.length === 0) { answerSeqRef.current++; setAnswering(false); return; }
+    if (!questionMode || !orKey || lines.length === 0) { answerSeqRef.current++; answerAbortRef.current?.abort(); answerAbortRef.current = null; setAnswering(false); return; }
     if (isFollowingScript(scriptPointerRef.current, missStreakRef.current, scriptWordsRef.current.length)) return;
     const now = Date.now();
     if (now - lastAnswerRef.current < 5000) return;
@@ -343,12 +349,15 @@ export default function App() {
     const ctx = lines.slice(-12).map(l => `[${l.speaker}]: ${l.text}`).join("\n");
     const prev = liveAnswerRef.current;
     const seq = ++answerSeqRef.current;
+    answerAbortRef.current?.abort(); // stop the superseded stream's network work
+    const controller = new AbortController();
+    answerAbortRef.current = controller;
     setAnswering(true);
     streamLiveAnswer(ctx, orKey, pulseContext, fastModel, partial => {
       if (seq !== answerSeqRef.current) return;
       const p = partial.trim();
       if (p && p !== "—") setLiveAnswer(p); // show it being formulated live
-    }).then(final => {
+    }, controller.signal).then(final => {
       if (seq !== answerSeqRef.current) return;
       const f = (final || "").trim();
       if (!f || f === "—") setLiveAnswer(prev); // nothing to say right now — keep the last draft, don't vanish
@@ -358,7 +367,7 @@ export default function App() {
         setScriptPointer(prev => prev === 0 ? prev : 0); setMissStreak(prev => prev === 0 ? prev : 0);
       }
       setAnswering(false);
-    }).catch(() => { if (seq === answerSeqRef.current) setAnswering(false); });
+    }).catch(() => { if (seq === answerSeqRef.current) setAnswering(false); }); // AbortError lands here silently
   }, [lines, questionMode, orKey, pulseContext, fastModel]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── navigator situation frame ───────────────────────────────────

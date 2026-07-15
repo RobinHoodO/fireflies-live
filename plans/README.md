@@ -24,7 +24,7 @@ touching out-of-scope files.
 | 008 | Retire legacy v1 app + drop 5 deps | P2 | M | 001 | DONE |
 | 009 | Root CLAUDE.md for agent onboarding | P2 | S | 001, 008 | DONE |
 | 010 | Stop re-rendering whole app per streamed word | P2 | M | 001 (after 006) | DONE |
-| 007 | Cancel stale streaming reads | P3 | M | 001 | TODO |
+| 007 | Cancel stale streaming reads | P3 | M | 001 | DONE |
 | 011 | Perf polish (debounce persistence, scope idle tick) | P3 | S | 001 (after 010) | TODO |
 | 012 | Minimize bridge audit-log content | P3 | S | 002 | TODO |
 | 013 | Fix actively-wrong docs (FEATURES, INTEGRATION_PLAN) | P3 | S | — (after 008) | TODO |

@@ -213,28 +213,31 @@ Each item is {"id":<existing id or null>,"kind":"topic"|"clarify"|"branch","text
 // being formulated. Resolves with the final text ("—" when no response is needed).
 export async function streamLiveAnswer(
   ctx: string, key: string, context: string, model: string,
-  onDelta: (partial: string) => void,
+  onDelta: (partial: string) => void, signal?: AbortSignal,
 ): Promise<string> {
   const sys = `You are Robin's live meeting copilot. Always draft, in Robin's own first-person voice, the single best thing Robin could say right now — ready to read aloud (1-3 sentences). Frame everything from Robin's perspective. Look at the most recent turns: if someone asked Robin something, answer it directly; otherwise proactively draft the line that best steers the conversation toward Robin's stated goal. Always produce a usable response — never decline, never output a dash or placeholder. No preamble, no labels.${context ? ` Context: ${context}` : ""}`;
   const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", "HTTP-Referer": "http://localhost:5173", "X-Title": "Fireflies Live" },
     body: JSON.stringify({ model, messages: [{ role: "system", content: sys }, { role: "user", content: `Transcript:\n${ctx}` }], max_tokens: 400, temperature: 0.7, stream: true }),
+    signal,
   });
   if (!r.ok || !r.body) return "";
   const reader = r.body.getReader(); const dec = new TextDecoder(); let buf = ""; let full = "";
-  for (;;) {
-    const { value, done } = await reader.read(); if (done) break;
-    buf += dec.decode(value, { stream: true });
-    const lines = buf.split("\n"); buf = lines.pop() || "";
-    for (const line of lines) {
-      const s = line.trim();
-      if (!s.startsWith("data:")) continue;
-      const data = s.slice(5).trim();
-      if (data === "[DONE]" || !data) continue;
-      try { const j = JSON.parse(data); const d = j.choices?.[0]?.delta?.content || ""; if (d) { full += d; onDelta(full); } } catch { /* keepalive / partial frame */ }
+  try {
+    for (;;) {
+      const { value, done } = await reader.read(); if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const lines = buf.split("\n"); buf = lines.pop() || "";
+      for (const line of lines) {
+        const s = line.trim();
+        if (!s.startsWith("data:")) continue;
+        const data = s.slice(5).trim();
+        if (data === "[DONE]" || !data) continue;
+        try { const j = JSON.parse(data); const d = j.choices?.[0]?.delta?.content || ""; if (d) { full += d; onDelta(full); } } catch { /* keepalive / partial frame */ }
+      }
     }
-  }
+  } finally { try { await reader.cancel(); } catch { /* already closed */ } }
   return full.trim();
 }
 
@@ -259,26 +262,29 @@ const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").replac
 // PI working in real time. Same session id => PI keeps the conversation context.
 export async function streamPI(
   message: string, sessionId: string, bridgeToken: string,
-  onDelta: (text: string) => void,
+  onDelta: (text: string) => void, signal?: AbortSignal,
 ): Promise<string> {
   // Dedicated /pi endpoint: fixed argv, no shell, provider keys injected server-side only.
   const res = await fetch("/bridge/pi", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${bridgeToken}` },
     body: JSON.stringify({ message, sessionId }),
+    signal,
   });
   if (!res.ok || !res.body) return "";
   const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = ""; let raw = "";
-  for (;;) {
-    const { value, done } = await reader.read(); if (done) break;
-    buf += dec.decode(value, { stream: true });
-    const parts = buf.split("\n"); buf = parts.pop() || "";
-    for (const p of parts) {
-      if (!p.trim()) continue;
-      let m: any; try { m = JSON.parse(p); } catch { continue; }
-      if (m.type === "out" || m.type === "err") { raw += m.data; onDelta(stripAnsi(raw)); }
+  try {
+    for (;;) {
+      const { value, done } = await reader.read(); if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const parts = buf.split("\n"); buf = parts.pop() || "";
+      for (const p of parts) {
+        if (!p.trim()) continue;
+        let m: any; try { m = JSON.parse(p); } catch { continue; }
+        if (m.type === "out" || m.type === "err") { raw += m.data; onDelta(stripAnsi(raw)); }
+      }
     }
-  }
+  } finally { try { await reader.cancel(); } catch { /* already closed */ } }
   return stripAnsi(raw).trim();
 }
 
