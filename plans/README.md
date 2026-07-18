@@ -46,7 +46,7 @@ independent, do it last since it's the risky one).
 |------|-------|----------|--------|------------|--------|
 | 016 | Kill bridge children on client disconnect; abort superseded PI streams | P2 | S | — | DONE |
 | 017 | Rotate the bridge audit log at boot | P3 | S | — | DONE |
-| 018 | Bump TypeScript 6 → 7 (+ @types/node 24 → 26) | P3 | S–M | — | TODO |
+| 018 | Bump TypeScript 6 → 7 (+ @types/node 24 → 26) | P3 | S–M | — | DONE |
 
 Round-2 vetting upgraded one finding: the deferred "PI-stream supersede-abort
 wiring" (plan 007) turned out to pair with a real bridge-side gap —
