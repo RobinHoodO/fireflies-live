@@ -33,6 +33,38 @@ touching out-of-scope files.
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (one-line reason) | REJECTED (one-line rationale).
 
+## Round 2 (2026-07-18, planned against `70bc54e`)
+
+Scope: the top remaining findings only — the deferred items recorded in
+`plans/PROGRESS.md` after round 1, re-vetted against the code (no fresh full
+audit). Selected non-interactively: top 3 by leverage, per the improve skill's
+default. Recommended order: 016 → 017 → 018 (016/017 both extend
+`server/bridge.test.mjs` — land 016 first so 017 rebases cleanly; 018 is
+independent, do it last since it's the risky one).
+
+| Plan | Title | Priority | Effort | Depends on | Status |
+|------|-------|----------|--------|------------|--------|
+| 016 | Kill bridge children on client disconnect; abort superseded PI streams | P2 | S | — | TODO |
+| 017 | Rotate the bridge audit log at boot | P3 | S | — | TODO |
+| 018 | Bump TypeScript 6 → 7 (+ @types/node 24 → 26) | P3 | S–M | — | TODO |
+
+Round-2 vetting upgraded one finding: the deferred "PI-stream supersede-abort
+wiring" (plan 007) turned out to pair with a real bridge-side gap —
+`streamChild` never reacts to client disconnect, so an aborted `/run`/`/pi`
+request leaves the child running up to the 120 s timeout. Plan 016 closes both
+ends.
+
+**Still deferred after round 2** (re-vetted, verdict: not worth a plan now):
+
+- **OpenRouter `/models` roster auto-fetch** (`v2/data.ts:17` hardcoded
+  `MODELS`): plan 015 already makes dead-model errors loud and name the slug,
+  so a stale entry costs one clear error message, while auto-fetch adds a
+  network dependency, provider-grouping logic, and a fallback path. Revisit
+  only if dead-model errors become a recurring annoyance.
+- **Kernel-side retrieval (roadmap 6.3/7.4)** and the other direction findings:
+  roadmap-scale, still gated on the operator choosing to scope them via
+  `improve next`.
+
 ## Recommended sequence
 
 1. **001 first, always** — it builds the `npm run verify` gate (v2 typecheck +
@@ -81,9 +113,9 @@ Status values: TODO | IN PROGRESS | DONE | BLOCKED (one-line reason) | REJECTED 
   the roadmap's kernel move (6.3 / 7.4). Not re-reported.
 - **`npm audit` clean, socket.io-client current**: no dependency-security findings.
 
-## Deferred (acknowledged, not planned this pass)
+## Deferred (acknowledged, not planned in round 1)
 
-- **TypeScript 6 → 7 bump** (DEPS-02): the only major-version lag with real value,
+- **TypeScript 6 → 7 bump** (DEPS-02): _→ now planned as 018 (round 2)._ The only major-version lag with real value,
   but low urgency (audit clean, nothing EOL) and MED risk. Sequence it *after* 001
   (so v2 is actually typechecked) and 008 (so the dead v1 tree isn't in the way).
   When ready: bump `typescript` to 7.x, run `npm run verify`, fix new type errors
