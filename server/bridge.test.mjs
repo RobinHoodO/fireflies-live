@@ -192,6 +192,33 @@ test("audit log stores metadata, not command bodies, by default", async () => {
   assert.ok(!log.includes("audit-canary-string"), "raw command text must not be logged without BRIDGE_AUDIT_BODIES=1");
 });
 
+test("client abort kills the running child", async () => {
+  const pidFile = path.join(fileDir, "abort-pid.txt");
+  const ac = new AbortController();
+  const p = fetch(`http://127.0.0.1:${PORT}/run`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${TOKEN}` },
+    body: JSON.stringify({ cmd: `echo $$ > '${pidFile}'; exec sleep 30` }),
+    signal: ac.signal,
+  });
+  // Wait for the child to write its pid, then abort the request.
+  let pid = 0;
+  for (let i = 0; i < 50 && !pid; i++) {
+    await new Promise((r) => setTimeout(r, 100));
+    try { pid = Number((await readFile(pidFile, "utf8")).trim()); } catch {}
+  }
+  assert.ok(pid > 0, "child never started");
+  ac.abort();
+  await p.catch(() => {}); // the aborted fetch rejects; that's expected
+  // Give the bridge a moment to react, then the pid must be gone.
+  let alive = true;
+  for (let i = 0; i < 30 && alive; i++) {
+    await new Promise((r) => setTimeout(r, 100));
+    try { process.kill(pid, 0); } catch { alive = false; }
+  }
+  assert.equal(alive, false, `child ${pid} still running after client abort`);
+});
+
 test("real transcripts dir untouched (test used temp dir)", () => {
   const files = readdirSync(fileDir);
   assert.ok(files.length >= 2, "expected test files in temp dir");

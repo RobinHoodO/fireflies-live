@@ -112,17 +112,20 @@ function piEnv() {
 // Stream a spawned child's stdout/stderr/exit to the NDJSON response, with an output
 // cap and hard timeout. Shared by /run and /pi.
 function streamChild(res, child) {
-  let bytes = 0, killed = false;
+  let bytes = 0, killed = false, exited = false;
   const cap = (chunk) => {
     bytes += chunk.length;
     if (bytes > MAX_OUTPUT && !killed) { killed = true; child.kill("SIGKILL"); return "\n[output truncated]\n"; }
     return chunk.toString();
   };
   const timer = setTimeout(() => { killed = true; child.kill("SIGKILL"); }, MAX_MS);
+  // Client gone (fetch aborted, tab closed): stop the child instead of streaming
+  // into a dead socket for up to MAX_MS.
+  res.on("close", () => { if (!exited && !killed) { killed = true; clearTimeout(timer); child.kill("SIGKILL"); } });
   child.stdout.on("data", (c) => { if (!killed) send(res, { type: "out", data: cap(c) }); });
   child.stderr.on("data", (c) => { if (!killed) send(res, { type: "err", data: cap(c) }); });
-  child.on("close", (code) => { clearTimeout(timer); send(res, { type: "exit", code: killed ? 137 : code }); res.end(); });
-  child.on("error", (e) => { clearTimeout(timer); send(res, { type: "err", data: String(e.message) }); send(res, { type: "exit", code: 1 }); res.end(); });
+  child.on("close", (code) => { exited = true; clearTimeout(timer); send(res, { type: "exit", code: killed ? 137 : code }); res.end(); });
+  child.on("error", (e) => { exited = true; clearTimeout(timer); send(res, { type: "err", data: String(e.message) }); send(res, { type: "exit", code: 1 }); res.end(); });
 }
 
 const server = http.createServer((req, res) => {

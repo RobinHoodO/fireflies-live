@@ -161,6 +161,7 @@ export default function App() {
   const agendaRef = useRef<AgendaItem[]>([]); agendaRef.current = agenda;
   const answerSeqRef = useRef(0);
   const answerAbortRef = useRef<AbortController | null>(null);
+  const piAbortRef = useRef<AbortController | null>(null);
   const lastNavRef = useRef(0); const navSeqRef = useRef(0);
   const lastSentimentRef = useRef(0); const sentimentSeqRef = useRef(0);
   const lastAgendaRef = useRef(0); const agendaSeqRef = useRef(0); const agendaIdRef = useRef(Math.max(0, ...agenda.map(item => item.id)) + 1);
@@ -347,6 +348,7 @@ export default function App() {
   // effect fires per streamed word; aborting in its cleanup would kill every
   // stream one word after it starts).
   useEffect(() => () => answerAbortRef.current?.abort(), []);
+  useEffect(() => () => piAbortRef.current?.abort(), []);
   useEffect(() => {
     if (!questionMode || !orKey || lines.length === 0) { answerSeqRef.current++; answerAbortRef.current?.abort(); answerAbortRef.current = null; setAnswering(false); return; }
     if (isFollowingScript(scriptPointerRef.current, missStreakRef.current, scriptWordsRef.current.length)) return;
@@ -510,13 +512,16 @@ export default function App() {
     if (!bridgeOnline) { setPiMessages(prev => [...prev, { id: uid + 1, role: "agent", text: "⚠ PI bridge offline — is the dev server running?" }]); return; }
     setPiThinking(true);
     const aid = uid + 1; let started = false;
+    piAbortRef.current?.abort(); // supersede: stop the previous stream's child + network work
+    const controller = new AbortController();
+    piAbortRef.current = controller;
     try {
       await streamPI(t, piSessionRef.current, bridgeToken, partial => {
         if (!started) { started = true; setPiThinking(false); setPiMessages(prev => [...prev, { id: aid, role: "agent", text: partial }]); }
         else setPiMessages(prev => prev.map(m => m.id === aid ? { ...m, text: partial } : m));
-      });
-    } catch { setPiMessages(prev => [...prev, { id: aid, role: "agent", text: "⚠ PI unreachable." }]); }
-    if (!started) setPiMessages(prev => [...prev, { id: aid, role: "agent", text: "_(no output)_" }]);
+      }, controller.signal);
+    } catch { if (!controller.signal.aborted) setPiMessages(prev => [...prev, { id: aid, role: "agent", text: "⚠ PI unreachable." }]); }
+    if (!started && !controller.signal.aborted) setPiMessages(prev => [...prev, { id: aid, role: "agent", text: "_(no output)_" }]);
     setPiThinking(false);
   };
   const submitPI = () => { const v = piInput.trim(); if (v) { setPiInput(""); sendPI(v); } };
