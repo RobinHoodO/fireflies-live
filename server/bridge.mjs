@@ -13,7 +13,7 @@
 import http from "node:http";
 import { spawn } from "node:child_process";
 import { appendFile, writeFile, readFile, readdir, stat, realpath } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, statSync, renameSync } from "node:fs";
 import path from "node:path";
 
 const HOST = "127.0.0.1";
@@ -22,6 +22,10 @@ const AUDIT = process.env.BRIDGE_AUDIT_FILE || path.resolve(process.cwd(), "serv
 // Audit metadata only by default — the log otherwise accumulates meeting content
 // and operator queries at rest. Opt into body logging for debugging.
 const AUDIT_BODIES = process.env.BRIDGE_AUDIT_BODIES === "1";
+// Rotate at boot: one .1 rollover caps disk growth (bridge restarts with every
+// dev-server boot, so boot-time-only is enough; no per-write stat cost).
+const AUDIT_MAX = Number(process.env.BRIDGE_AUDIT_MAX_BYTES) || 5_000_000;
+try { if (statSync(AUDIT).size > AUDIT_MAX) renameSync(AUDIT, `${AUDIT}.1`); } catch { /* no log yet */ }
 const MAX_OUTPUT = 200_000; // bytes per run, then truncate
 const MAX_MS = 120_000;     // hard timeout per command
 const FILE_DIR = process.env.BRIDGE_FILE_DIR || "/Users/robinsverd/Thrivbe-AI/content/meetings/transcripts";

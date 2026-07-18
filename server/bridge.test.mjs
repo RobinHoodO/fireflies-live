@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import http from "node:http";
 import { mkdtemp, rm, readFile, mkdir, writeFile, symlink } from "node:fs/promises";
-import { readdirSync } from "node:fs";
+import { readdirSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -190,6 +190,27 @@ test("audit log stores metadata, not command bodies, by default", async () => {
   const log = await readFile(path.join(fileDir, "audit.log"), "utf8");
   assert.ok(log.includes("RUN"), "expected a RUN audit line");
   assert.ok(!log.includes("audit-canary-string"), "raw command text must not be logged without BRIDGE_AUDIT_BODIES=1");
+});
+
+test("oversized audit log rotates to .1 at boot", async () => {
+  const auditPath = path.join(fileDir, "rotate-audit.log");
+  await writeFile(auditPath, "x".repeat(200) + "\n");
+  const port2 = PORT + 1;
+  const c2 = spawn("node", ["server/bridge.mjs"], {
+    env: { ...process.env, BRIDGE_TOKEN: TOKEN, BRIDGE_PORT: String(port2), BRIDGE_FILE_DIR: fileDir, BRIDGE_CLIENTS_ROOT: clientsDir, BRIDGE_AUDIT_FILE: auditPath, BRIDGE_AUDIT_MAX_BYTES: "100" },
+    stdio: "ignore",
+  });
+  try {
+    let ready = false;
+    for (let i = 0; i < 50 && !ready; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      try { const r = await fetch(`http://127.0.0.1:${port2}/health`); ready = r.ok; } catch {}
+    }
+    assert.ok(ready, "rotation-test bridge did not boot");
+    const rolled = await readFile(`${auditPath}.1`, "utf8");
+    assert.ok(rolled.startsWith("xxx"), "old log content should be in the .1 rollover");
+    assert.ok(!existsSync(auditPath) || (await readFile(auditPath, "utf8")).length < 100, "fresh log should be empty or tiny");
+  } finally { c2.kill("SIGKILL"); }
 });
 
 test("client abort kills the running child", async () => {

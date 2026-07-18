@@ -45,7 +45,7 @@ independent, do it last since it's the risky one).
 | Plan | Title | Priority | Effort | Depends on | Status |
 |------|-------|----------|--------|------------|--------|
 | 016 | Kill bridge children on client disconnect; abort superseded PI streams | P2 | S | — | DONE |
-| 017 | Rotate the bridge audit log at boot | P3 | S | — | TODO |
+| 017 | Rotate the bridge audit log at boot | P3 | S | — | DONE |
 | 018 | Bump TypeScript 6 → 7 (+ @types/node 24 → 26) | P3 | S–M | — | TODO |
 
 Round-2 vetting upgraded one finding: the deferred "PI-stream supersede-abort
