@@ -158,7 +158,9 @@ export default function App() {
   const splitElRef = useRef<HTMLDivElement>(null);
   const chatComposerRef = useRef<HTMLTextAreaElement>(null);
   const connRef = useRef<{ connect: () => Promise<void>; disconnect: () => void } | null>(null);
-  const lastSpeakerRef = useRef(""); const lineCounter = useRef(0); const lastSuggestRef = useRef(0); const suggestSeqRef = useRef(0); const lastAnswerRef = useRef(0);
+  // Counters re-seed past restored ids — a post-resume line/suggestion must
+  // never mint a duplicate id (duplicate React keys silently drop rows).
+  const lastSpeakerRef = useRef(""); const lineCounter = useRef(lines.reduce((max, l) => { const m = /^l(\d+)$/.exec(l.id); return m ? Math.max(max, Number(m[1])) : max; }, 0)); const lastSuggestRef = useRef(0); const suggestSeqRef = useRef(0); const lastAnswerRef = useRef(0);
   const suggestionsRef = useRef<Suggestion[]>([]); suggestionsRef.current = suggestions;
   const agendaRef = useRef<AgendaItem[]>([]); agendaRef.current = agenda;
   const answerSeqRef = useRef(0);
@@ -168,7 +170,7 @@ export default function App() {
   const lastSentimentRef = useRef(0); const sentimentSeqRef = useRef(0);
   const lastAgendaRef = useRef(0); const agendaSeqRef = useRef(0); const agendaIdRef = useRef(Math.max(0, ...agenda.map(item => item.id)) + 1);
   const constellationErrRef = useRef<number | undefined>(undefined);
-  const liveAnswerRef = useRef(""); const sidRef = useRef(1);
+  const liveAnswerRef = useRef(""); const sidRef = useRef(suggestions.length ? Math.max(...suggestions.map(s => s.id)) + 1 : 1);
   const scriptWordsRef = useRef<string[]>([]); const consumedTranscriptWordsRef = useRef(new Map<string, number>());
   const scriptPointerRef = useRef(0); const missStreakRef = useRef(0);
   // Stable PI session id — reused across reloads so PI keeps conversation context.
@@ -187,7 +189,15 @@ export default function App() {
   // Persist session CONTENT so a reload (tab discard, server restart) resumes the
   // meeting instead of wiping it. Debounced; pagehide flushes the final state.
   useEffect(() => {
-    const write = () => { try { localStorage.setItem("fl-session", packSession({ lines, suggestions, agenda, messages, piMessages, navFrame, selectedMeeting, constellation, status }, Date.now())); } catch { /* storage unavailable */ } };
+    const write = () => {
+      // Chat/PI logs are the only unbounded fields (PI output can be 200KB per
+      // run) — cap what's persisted so a long meeting can't blow the
+      // localStorage quota and silently stop persistence.
+      const core = { lines, suggestions, agenda, navFrame, selectedMeeting, constellation, status };
+      const trim = (ms: Message[], n: number) => ms.slice(-n).map(m => m.text.length > 20_000 ? { ...m, text: `${m.text.slice(0, 20_000)}\n…[truncated]` } : m);
+      try { localStorage.setItem("fl-session", packSession({ ...core, messages: trim(messages, 200), piMessages: trim(piMessages, 60) }, Date.now())); }
+      catch { try { localStorage.setItem("fl-session", packSession(core, Date.now())); } catch { /* storage unavailable */ } }
+    };
     const id = setTimeout(write, 1000);
     window.addEventListener("pagehide", write);
     return () => { clearTimeout(id); window.removeEventListener("pagehide", write); };
@@ -244,7 +254,10 @@ export default function App() {
   const loadMeetings = useCallback(async () => {
     if (!ffKey) return; setLoadingMeetings(true); setMeetingsError("");
     const { meetings: ms, error } = await fetchMeetings(ffKey);
-    setMeetings(ms); setMeetingsError(error); const a = ms.find(m => m.active); if (a) setSelectedMeeting(a);
+    // Auto-select an active meeting only when none is selected — must not
+    // clobber a restored/resumed meeting's identity (its title names the
+    // filed transcript).
+    setMeetings(ms); setMeetingsError(error); const a = ms.find(m => m.active); if (a) setSelectedMeeting(prev => prev ?? a);
     setLoadingMeetings(false);
   }, [ffKey]);
   useEffect(() => { if (ffKey) loadMeetings(); }, [ffKey, loadMeetings]);

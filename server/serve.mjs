@@ -27,9 +27,12 @@ const MIME = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css
 export function hostAllowed(host, allowed) {
   return !!host && allowed.includes(host);
 }
-// Resolve a URL path inside DIST; "" when it would escape the root.
+// Resolve a URL path inside DIST; "" when it would escape the root or the
+// encoding is malformed (a lone "%" must 400, not throw and kill the server).
 export function safeDistPath(urlPath, dist = DIST) {
-  const clean = path.normalize(decodeURIComponent(urlPath.split("?")[0])).replace(/^\/+/, "");
+  let decoded;
+  try { decoded = decodeURIComponent(urlPath.split("?")[0]); } catch { return ""; }
+  const clean = path.normalize(decoded).replace(/^\/+/, "");
   const full = path.resolve(dist, clean === "" ? "index.html" : clean);
   return full === dist || full.startsWith(`${dist}${path.sep}`) ? full : "";
 }

@@ -19,6 +19,9 @@ test("static paths stay inside dist", () => {
   assert.equal(safeDistPath("/assets/app.js?v=1", DIST), `${DIST}/assets/app.js`);
   // Traversal attempts must never escape dist: either rejected ("") or
   // neutralized to a path still inside it (where the file lookup 404s).
+  // Malformed percent-encoding must be rejected, never thrown (crash-DoS).
+  assert.equal(safeDistPath("/%", DIST), "");
+  assert.equal(safeDistPath("/%zz/app.js", DIST), "");
   for (const attack of ["/../../etc/passwd", "/%2e%2e/%2e%2e/etc/passwd", "/assets/../../secret", "/..%2f..%2fetc/passwd"]) {
     const resolved = safeDistPath(attack, DIST);
     assert.ok(resolved === "" || resolved.startsWith(`${DIST}/`), `${attack} → ${resolved}`);
