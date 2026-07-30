@@ -57,8 +57,12 @@ if (process.env.SERVE_TEST !== "1") {
     // Key injection — same-origin gate mirrors the dev middleware: only the
     // app's own fetch (or a direct navigation) may read the keys.
     if (req.method === "GET" && req.url === "/api/fireflies-key") {
+      // Chrome only sends Sec-Fetch-Site to secure contexts (HTTPS/localhost);
+      // this app is plain HTTP on the tailnet, so ABSENT is normal — enforce
+      // only when present. Cross-origin reads stay blocked by CORS (no ACAO)
+      // and the tailnet-only firewall.
       const sfs = req.headers["sec-fetch-site"];
-      if (sfs !== "same-origin" && sfs !== "none") { res.writeHead(403); res.end("forbidden"); return; }
+      if (sfs && sfs !== "same-origin" && sfs !== "none") { res.writeHead(403); res.end("forbidden"); return; }
       let env = "";
       try { env = readFileSync(ENV_FILE, "utf-8"); } catch { /* missing env file → empty keys */ }
       res.writeHead(200, { "Content-Type": "application/json" });
