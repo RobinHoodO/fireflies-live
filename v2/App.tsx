@@ -16,11 +16,13 @@ import {
   fetchKeys, fetchMeetings, callAI, fetchSuggestions, streamLiveAnswer, streamPI, proposeModes,
   connectLive, connectDemo, fileMeeting, fetchNavFrame, fetchSentiment, fetchContext, fetchAgenda, MODE_CONTEXT, type Meeting, type ConnStatus, type NavFrame, type SentimentPoint, type Constellation, type AgendaKind,
 } from "./backend";
+import { packSession, unpackSession, shouldAutoResume } from "./session";
 
 // Persisted UI config — survives reloads / new sessions (localStorage).
 const SAVED: any = (() => { try { return JSON.parse(localStorage.getItem("fl-config") || "{}"); } catch { return {}; } })();
-// Session content is intentionally NOT restored — Fireflies Live opens clean every time (config below still persists).
-const SESSION: any = {}; try { localStorage.removeItem("fl-session"); } catch { /* storage unavailable */ }
+// Session content survives reloads (tab discard, server restart) while fresh —
+// a reload mid-meeting must not lose the meeting. Stale sessions open clean.
+const SESSION: any = (() => { try { return unpackSession(localStorage.getItem("fl-session"), Date.now()); } catch { return {}; } })();
 
 const BORDER = "oklch(0.91 0.006 255)";
 const CARD_SHADOW = "0 1px 2px rgba(16,24,40,.04),0 12px 32px -24px rgba(16,24,40,.22)";
@@ -181,6 +183,27 @@ export default function App() {
     window.addEventListener("pagehide", write);
     return () => { clearTimeout(id); window.removeEventListener("pagehide", write); };
   }, [view, mode, model, fastModel, flags, rate, questionMode, customContext, goal]);
+
+  // Persist session CONTENT so a reload (tab discard, server restart) resumes the
+  // meeting instead of wiping it. Debounced; pagehide flushes the final state.
+  useEffect(() => {
+    const write = () => { try { localStorage.setItem("fl-session", packSession({ lines, suggestions, agenda, messages, piMessages, navFrame, selectedMeeting, constellation, status }, Date.now())); } catch { /* storage unavailable */ } };
+    const id = setTimeout(write, 1000);
+    window.addEventListener("pagehide", write);
+    return () => { clearTimeout(id); window.removeEventListener("pagehide", write); };
+  }, [lines, suggestions, agenda, messages, piMessages, navFrame, selectedMeeting, constellation, status]);
+
+  // Auto-resume: if the page reloaded seconds ago mid-call, reconnect to the same
+  // meeting WITHOUT clearing restored state (startConnection would wipe it).
+  // Rebroadcast chunks dedupe by chunk id in onTranscriptLine.
+  const autoResumeRef = useRef(shouldAutoResume(SESSION, Date.now()));
+  useEffect(() => {
+    if (!ffKey || !autoResumeRef.current || !selectedMeeting) return;
+    autoResumeRef.current = false;
+    connRef.current?.disconnect();
+    connRef.current = connectLive(onTranscriptLine, setStatusMapped, ffKey, selectedMeeting.id);
+    connRef.current.connect();
+  }, [ffKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // derived context for the AI: selected mode + any custom note
   const modeCtx = MODE_CONTEXT[mode] ?? suggested.find(s => s.id === mode)?.context ?? "";

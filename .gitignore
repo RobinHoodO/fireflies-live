@@ -30,3 +30,6 @@ server/audit.log
 .playwright-mcp/
 after-spacing.png
 *.tsbuildinfo
+.gitnexus
+chrome-extension/native-host/
+server/launchd-wrapper.sh

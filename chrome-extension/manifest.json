@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "Fireflies Live Launcher",
+  "version": "1.0.0",
+  "description": "One click: open Fireflies Live (hosted on Thrivbe-1).",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvP56NS+iMR3UVEMzYDXgBccYS1Xz6JOIsXVuslk93bL5YlrvQ4i5gbsDHuEUEOBbPACRInQ1lWtrWsqpoIX8PMe2RIYXHhPglSxTutYg8akbPZaNIrMAIA8InzbN153b64qoYW9fz+28m1c4O03BNzP7Iq7hPpcZIJhrCxXuMVYZ6nlel4IkqloIzOpWKyzFAUup5hgyq3vN2NMwLUK51RHJbxojMueU5GGCGnGYBrZx48IKB/HWx9SWdalrts/UCiLGMXhTr1/kBjTcr939AePG5HLJP3QpBu4L9bnk1aNRUStusa/t5buQ83vQRKdYERXtRfw496AZAGfFlmkRywIDAQAB",
+  "permissions": ["tabs"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "Start Fireflies Live" },
+  "icons": { "16": "icon.png", "48": "icon.png", "128": "icon.png" }
+}

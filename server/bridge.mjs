@@ -30,7 +30,7 @@ const MAX_OUTPUT = 200_000; // bytes per run, then truncate
 const MAX_MS = 120_000;     // hard timeout per command
 const FILE_DIR = process.env.BRIDGE_FILE_DIR || "/Users/robinsverd/Thrivbe-AI/content/meetings/transcripts";
 const SEM = "http://127.0.0.1:3015/search";
-const CONTENT_ROOT = "/Users/robinsverd/Thrivbe-AI/content";
+const CONTENT_ROOT = process.env.BRIDGE_CONTENT_ROOT || "/Users/robinsverd/Thrivbe-AI/content";
 const CLIENTS_ROOT = process.env.BRIDGE_CLIENTS_ROOT || "/Users/robinsverd/Thrivbe-AI/clients";
 
 // Catastrophic patterns we refuse outright. Not a security boundary against a
