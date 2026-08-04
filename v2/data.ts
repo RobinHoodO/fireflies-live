@@ -65,13 +65,27 @@ export const TABS = [
   { id: "feed", l: "Live feed", ic: "i-bulb" }, { id: "chat", l: "Chat", ic: "i-message" }, { id: "pi", l: "PI", ic: "i-terminal" },
 ];
 
-export const FILTERS = [{ id: "all", l: "All" }, { id: "ask", l: "Ask" }, { id: "do", l: "Do" }, { id: "note", l: "Note" }, { id: "command", l: "Command" }];
+// Feed filter chips. "agenda" is a group chip covering the three agenda kinds;
+// chips are multi-select (none selected = everything).
+export const FILTERS = [
+  { id: "ask", l: "Ask" }, { id: "do", l: "Do" }, { id: "note", l: "Note" },
+  { id: "command", l: "Command" }, { id: "agenda", l: "Agenda" },
+];
+
+// Types Robin can add by hand from the feed composer.
+export const ADDABLE = [
+  { id: "note", l: "Note" }, { id: "topic", l: "Agenda point" }, { id: "ask", l: "Ask" },
+  { id: "do", l: "Do" }, { id: "clarify", l: "Clarify" }, { id: "branch", l: "Branch" },
+];
 
 export const SUGMETA: Record<string, { kind: string; icon: string; color: string; bg: string }> = {
   ask: { kind: "Ask", icon: "i-help", color: "oklch(0.55 0.16 242)", bg: "oklch(0.965 0.03 242)" },
   do: { kind: "Do", icon: "i-zap", color: "oklch(0.5 0.14 155)", bg: "oklch(0.96 0.04 155)" },
   note: { kind: "Note", icon: "i-bulb", color: "oklch(0.6 0.12 70)", bg: "oklch(0.97 0.04 75)" },
   command: { kind: "Command", icon: "i-terminal", color: "oklch(0.52 0.15 290)", bg: "oklch(0.96 0.03 290)" },
+  topic: { kind: "Agenda", icon: "i-arrow", color: "oklch(0.45 0.17 242)", bg: "oklch(0.93 0.05 242)" },
+  clarify: { kind: "Clarify", icon: "i-help", color: "oklch(0.58 0.12 70)", bg: "oklch(0.97 0.04 75)" },
+  branch: { kind: "Branch", icon: "i-command", color: "oklch(0.5 0.15 320)", bg: "oklch(0.96 0.03 320)" },
 };
 
 // Live data shapes — populated by the backend at runtime (see App.tsx / backend.ts).

@@ -7,8 +7,16 @@ before → live copilot → meeting-analyser after). Status source of truth:
 ## Active app
 
 `v2/` is the app (Vite + React 19, one main component `v2/App.tsx`, backend
-wiring in `v2/backend.ts`). The legacy v1 `src/` tree was deleted 2026-07-15
-(plan 008) — if you see references to it in docs, they're historical.
+wiring in `v2/backend.ts`, feed priority helpers in `v2/feed.ts`). The legacy v1
+`src/` tree was deleted 2026-07-15 (plan 008) — if you see references to it in
+docs, they're historical.
+
+**One feed, one loop (2026-08-04):** suggestions (ask/do/note/command) and
+agenda points (topic/clarify/branch) are a single prioritized list maintained by
+a single `fetchFeed` call — merging the two loops halved the input cost and let
+the model rank everything against everything. Priority is a blend: Robin's ▲/▼
+votes win outright (`prioritize` in `v2/feed.ts`), the AI's returned `order`
+only breaks ties, done sinks. Never let the AI rewrite a `source:"you"` item.
 
 ## Hosted on Thrivbe-1 (since 2026-07-30)
 
@@ -70,7 +78,7 @@ Fireflies token, despite the name) and `OPENROUTER_API`. The dev middleware
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **fireflies-live** (1225 symbols, 2407 relationships, 105 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **fireflies-live** (1226 symbols, 2410 relationships, 105 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 

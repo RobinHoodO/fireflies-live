@@ -6,6 +6,10 @@
 export type ConnStatus = "disconnected" | "connecting" | "connected" | "error";
 export type SugType = "ask" | "do" | "note" | "command";
 export type AgendaKind = "topic" | "clarify" | "branch";
+// One feed: suggestions and agenda points are the same list, differing only by type.
+export type FeedType = SugType | AgendaKind;
+export const AGENDA_TYPES: AgendaKind[] = ["topic", "clarify", "branch"];
+export const FEED_TYPES: FeedType[] = ["ask", "do", "note", "command", "topic", "clarify", "branch"];
 export interface BackendSuggestion { id: number; type: SugType; text: string; t: number }
 export interface NavFrame { phase: string; stance: string; goal_progress: string; next_move: string; risk: string }
 export interface SentimentPoint { score: number; label: string; t: number }
@@ -146,80 +150,67 @@ export async function fetchSentiment(ctx: string, key: string, model: string): P
   } catch { return null; }
 }
 
-// A suggestion to add (id:null), refine in place (id = existing suggestion id), or mark complete.
-export interface SuggestionUpdate { id: number | null; type: SugType; text: string; status?: "done"; outcome?: string }
+// A feed item to add (id:null), refine in place (id = existing item id), or mark done.
+export interface FeedUpdate { id: number | null; type?: FeedType; text: string; status?: "done"; outcome?: string }
+// `order` is the AI's priority ranking; null when it left priority unchanged (saves tokens).
+export interface FeedResult { items: FeedUpdate[]; order: number[] | null }
 
-export async function fetchSuggestions(
-  ctx: string, key: string, context: string, model: string,
-  existing: { id: number; type: SugType; text: string; done?: boolean }[],
-): Promise<SuggestionUpdate[]> {
-  const list = existing.slice(0, 10).map(s => ({ id: s.id, type: s.type, text: s.text, done: !!s.done }));
-  const sys = `You are Robin's real-time meeting copilot.${context ? ` Context: ${context}` : ""} You maintain a short live list of suggestions for Robin. Types: "ask" (a sharp question Robin could ask), "do" (a concrete task), "note" (something notable to remember), "command" (an exact shell command to run on Robin's machine — for this type "text" MUST be a single runnable command with no prose).
-Existing suggestions as JSON (each with an "id"): ${JSON.stringify(list)}. Items marked "done" are already handled.
-Read the latest transcript, then decide changes:
-- If newer context makes an EXISTING suggestion more precise or more actionable, return it with its SAME "id" and improved "text". This UPDATES it in place — never emit a near-duplicate of something that already exists.
-- FOLLOW-THROUGH: compare the latest transcript against the existing suggestions. If Robin has clearly ACTED on one (he said the suggested thing or did the task), return it with its SAME "id", "status":"done" and "outcome":"<how the other side responded / how it landed, under 12 words>". Do not mark items done without transcript evidence.
-- Only create a NEW suggestion ("id": null) for a genuinely new idea not already covered.
-- Do NOT return existing suggestions that are unchanged.
-- Only propose a "command" when running something on Robin's machine is clearly useful and safe.
-Each item: {"id": <existing id or null>, "type": "ask"|"do"|"note"|"command", "text": "<under 14 words; for command, the exact shell command>"}. For a follow-through update, only "id", "status", and "outcome" are required; the app preserves its original text and type. Respond ONLY with a JSON array (it may be empty). No prose.`;
-  const raw = await callAI([{ role: "system", content: sys }, { role: "user", content: `Transcript:\n${ctx}` }], key, model);
-  const arr = modelJsonArray(raw);
-  if (!arr) return [];
+export interface FeedOpts { context: string; goal: string; bundleHint: string; meetingTitle: string; agenda: boolean }
+
+// One call maintains the whole live feed — suggestions AND agenda points — plus
+// their priority order. Two loops used to do this; merging halves the input cost
+// and lets the model rank everything against everything.
+export async function fetchFeed(
+  ctx: string, key: string, opts: FeedOpts, model: string,
+  existing: { id: number; type: FeedType; text: string; done?: boolean; votes: number; source: "ai" | "you" }[],
+): Promise<FeedResult | null> {
+  const list = existing.slice(0, 24).map(item => ({ id: item.id, type: item.type, text: item.text, votes: item.votes, source: item.source, ...(item.done ? { done: true } : {}) }));
+  const sys = `You are Robin's real-time meeting copilot. You maintain ONE priority-ordered live feed for the meeting.
+Item types:
+- "ask": a sharp question Robin could ask right now
+- "do": a concrete task
+- "note": something notable to remember
+- "command": an exact single runnable shell command for Robin's machine ("text" IS the command, no prose) — only when clearly useful and safe${opts.agenda ? `
+- "topic": a point still to cover in this meeting
+- "clarify": an open question or unresolved point that needs clarifying
+- "branch": a promising conversation direction worth steering into` : ""}
+MEETING: ${opts.meetingTitle || "Meeting"}
+ROBIN'S GOAL: ${opts.goal || "Advance the meeting productively."}${opts.context ? `\nCONTEXT: ${opts.context}` : ""}${opts.bundleHint ? `\nBACKGROUND (Robin's resources):\n${opts.bundleHint}` : ""}
+Current feed as JSON, most important first: ${JSON.stringify(list)}
+Items with "source":"you" were written by Robin himself — that is human intuition and outranks yours: never drop them, never reword them, and keep them high unless the transcript shows they are handled. "votes" is Robin's explicit priority signal. "done" items are already handled.
+Read the latest transcript, then return ONLY changes:
+- Refine an existing item in place with its SAME "id" and better "text" when newer context makes it sharper. Never emit a near-duplicate of an existing item.
+- FOLLOW-THROUGH: if the transcript shows an item was said, done, covered or made irrelevant, return its SAME "id" with "status":"done" and "outcome":"<how it landed, under 12 words>". Never mark done without transcript evidence.
+- Create a NEW item ("id":null) only for a genuinely new idea not already covered.${opts.agenda ? " When the feed has no agenda points yet, seed a few from Robin's goal and the background." : ""}
+- Omit unchanged items entirely.
+- "order": the full priority ranking of ALL current ids, most important first. Rank by what most advances Robin's goal right now, then time-sensitivity. Include "order" ONLY when the priority actually changed — otherwise omit the key entirely. New items are not in "order" yet (they have no id until the app assigns one); they enter at the top and you rank them on your next pass, so re-rank promptly after adding.
+Each item: {"id":<existing id or null>,"type":"<type>","text":"<under 16 words>"}. A done update needs only "id", "status", "outcome".
+Respond ONLY with {"items":[...]} (plus "order" when it changed). No prose, no markdown.`;
   try {
-    const valid: SugType[] = ["ask", "do", "note", "command"];
-    return arr.filter((x: any) => x && (x.text || x.status === "done")).slice(0, 6).map((x: any) => ({
-      id: typeof x.id === "number" ? x.id : null,
-      type: valid.includes(x.type) ? x.type : (TYPE_MAP[x.type] || "note"),
-      text: String(x.text ?? ""),
-      ...(x.status === "done" ? { status: "done" as const, outcome: String(x.outcome ?? "") } : {}),
-    }));
-  } catch { return []; }
-}
-
-// An agenda item to add (id:null), refine in place (id = existing item id), or mark done.
-export interface AgendaUpdate { id: number | null; text: string; kind?: AgendaKind; status?: "done" }
-export interface AgendaResult { items: AgendaUpdate[]; order: number[] }
-
-export async function fetchAgenda(
-  ctx: string, key: string, goal: string, bundleHint: string, meetingTitle: string, model: string,
-  existing: { id: number; text: string; kind: AgendaKind; done?: boolean; votes: number; source: "ai" | "you" }[],
-): Promise<AgendaResult | null> {
-  const list = existing.map(item => ({ id: item.id, text: item.text, kind: item.kind, done: !!item.done, votes: item.votes, source: item.source }));
-  const sys = `You maintain Robin's dynamic meeting agenda: the compact priority-ordered list of points to cover next in this meeting.
-Kinds: "topic" is a point to cover; "clarify" is an open question or unresolved point that still needs clarification; "branch" is a promising conversation direction worth steering into for Robin's goal.
-MEETING TITLE: ${meetingTitle || "Meeting"}
-ROBIN'S GOAL: ${goal || "Advance the meeting productively."}${bundleHint ? `\nBACKGROUND (Robin's resources):\n${bundleHint}` : ""}
-Current agenda as JSON: ${JSON.stringify(list)}. "source" says whether Robin or AI added the item; preserve that history. "done" items have already been covered.
-Read the latest transcript, then maintain the agenda:
-- When the current agenda is empty, seed useful initial points from Robin's goal and the background.
-- Add a new point only when the conversation surfaces a topic people clearly want to cover, an open point that needs clarifying, or a branch worth steering into — and it is not already represented.
-- Refine an existing point in place with its SAME id when newer context makes it more precise (a "clarify" that got answered but opened a follow-up may change kind). Never create a near-duplicate.
-- Mark an existing point with its SAME id and "status":"done" only when transcript evidence shows it was covered, resolved, or clearly made irrelevant. Do not mark it done without evidence.
-- Return the full desired priority order as ids in "order". Keep all current ids in that order; the order changes priority, never deletes agenda items.
-- VOTING IS A HARD SIGNAL: items with positive votes must stay near the top and must never be dropped. Items with votes <= -2 must be deprioritized to the bottom, or marked done only when transcript evidence shows they are irrelevant. Never remove or reorder against a user's explicit votes.
-Each item is {"id":<existing id or null>,"kind":"topic"|"clarify"|"branch","text":"<under 16 words>"}; a done update may omit text and kind. New items use "id":null. Respond ONLY with {"items":[...],"order":[id,id,...]}. No prose or markdown.`;
-  try {
-    const raw = await callAI([{ role: "system", content: sys }, { role: "user", content: `Transcript (latest last):\n${ctx}` }], key, model, 800);
+    const raw = await callAI([{ role: "system", content: sys }, { role: "user", content: `Transcript (latest last):\n${ctx}` }], key, model, 900);
     const value = modelJsonObject(raw);
-    if (!value || !Array.isArray(value.items) || !Array.isArray(value.order)) return null;
-    if (!value.order.every((id: any) => Number.isInteger(id))) return null;
-    if (!value.items.every((item: any) => item && typeof item === "object" && (item.id === null || Number.isInteger(item.id)) && (item.status === undefined || item.status === "done") && (typeof item.text === "string" || (item.status === "done" && typeof item.id === "number")))) return null;
-    const kinds: AgendaKind[] = ["topic", "clarify", "branch"];
-    return {
-      items: value.items.map((item: any) => ({ id: item.id, text: typeof item.text === "string" ? item.text : "", ...(kinds.includes(item.kind) ? { kind: item.kind as AgendaKind } : {}), ...(item.status === "done" ? { status: "done" as const } : {}) })),
-      order: value.order,
-    };
+    if (!value || !Array.isArray(value.items)) return null;
+    const order = Array.isArray(value.order) && value.order.every((id: any) => Number.isInteger(id)) ? (value.order as number[]) : null;
+    const items = value.items
+      .filter((x: any) => x && typeof x === "object" && (x.id === null || Number.isInteger(x.id)) && (x.status === undefined || x.status === "done") && (typeof x.text === "string" || (x.status === "done" && Number.isInteger(x.id))))
+      .slice(0, 8)
+      .map((x: any) => ({
+        id: Number.isInteger(x.id) ? x.id : null,
+        ...(FEED_TYPES.includes(x.type) ? { type: x.type as FeedType } : TYPE_MAP[x.type] ? { type: TYPE_MAP[x.type] } : {}),
+        text: typeof x.text === "string" ? x.text : "",
+        ...(x.status === "done" ? { status: "done" as const, outcome: String(x.outcome ?? "") } : {}),
+      }));
+    return { items, order };
   } catch { return null; }
 }
 
 // Live "Say this" answer, streamed token-by-token via onDelta so the UI shows it
 // being formulated. Resolves with the final text ("—" when no response is needed).
 export async function streamLiveAnswer(
-  ctx: string, key: string, context: string, model: string,
+  ctx: string, key: string, context: string, model: string, prev: string,
   onDelta: (partial: string) => void, signal?: AbortSignal,
 ): Promise<string> {
-  const sys = `You are Robin's live meeting copilot. Always draft, in Robin's own first-person voice, the single best thing Robin could say right now — ready to read aloud (1-3 sentences). Frame everything from Robin's perspective. Look at the most recent turns: if someone asked Robin something, answer it directly; otherwise proactively draft the line that best steers the conversation toward Robin's stated goal. Always produce a usable response — never decline, never output a dash or placeholder. No preamble, no labels.${context ? ` Context: ${context}` : ""}`;
+  const sys = `You are Robin's live meeting copilot. Always draft, in Robin's own first-person voice, the single best thing Robin could say right now — ready to read aloud (1-3 sentences). Frame everything from Robin's perspective. Look at the most recent turns: if someone asked Robin something, answer it directly; otherwise proactively draft the line that best steers the conversation toward Robin's stated goal. Always produce a usable response — never decline, never output a dash or placeholder. No preamble, no labels.${prev ? `\nYOUR CURRENT DRAFT (already on Robin's screen):\n${prev}\nStability matters more than novelty: if that draft is still the right thing to say, repeat it VERBATIM. Only rewrite it when the conversation has genuinely moved past it.` : ""}${context ? ` Context: ${context}` : ""}`;
   const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", "HTTP-Referer": "http://localhost:5173", "X-Title": "Fireflies Live" },
