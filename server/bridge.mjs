@@ -13,7 +13,7 @@
 import http from "node:http";
 import { spawn } from "node:child_process";
 import { appendFile, writeFile, readFile, readdir, stat, realpath } from "node:fs/promises";
-import { existsSync, statSync, renameSync } from "node:fs";
+import { existsSync, statSync, renameSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 const HOST = "127.0.0.1";
@@ -118,10 +118,18 @@ function piEnv() {
 // the meeting context travels in the prompt, not in a resumed session.
 const WORKSPACE = process.env.BRIDGE_WORKSPACE || path.dirname(CONTENT_ROOT);
 const CLAUDE_MODEL = process.env.BRIDGE_CLAUDE_MODEL || "sonnet";
-// acceptEdits, not bypassPermissions: the operator reviews and sends every
-// message by hand in the UI, but a transcript-derived instruction should still
-// not get a blank cheque on this machine.
-const CLAUDE_PERMISSION_MODE = process.env.BRIDGE_CLAUDE_PERMISSION_MODE || "acceptEdits";
+// bypassPermissions, by Robin's decision (2026-08-04): mid-meeting there is
+// nobody to answer a permission prompt, and a headless `claude -p` that stops
+// to ask is useless. The gate is human and upstream — every command is staged
+// into the composer, read, and sent by hand. The denylist below still applies.
+const CLAUDE_PERMISSION_MODE = process.env.BRIDGE_CLAUDE_PERMISSION_MODE || "bypassPermissions";
+// Startup orientation for every Claude instance: what Fireflies Live is and
+// where the workspace keeps its context. Edited as prose, not code.
+const CLAUDE_CONTEXT_FILE = process.env.BRIDGE_CLAUDE_CONTEXT_FILE || path.resolve(process.cwd(), "server", "claude-context.md");
+const CLAUDE_CONTEXT = (() => {
+  try { return readFileSync(CLAUDE_CONTEXT_FILE, "utf8").replace(/^#.*$/gm, "").trim(); }
+  catch { return ""; } // missing file just means no extra context, not a broken bridge
+})();
 
 // Stream a spawned child's stdout/stderr/exit to the NDJSON response, with an output
 // cap and hard timeout. Shared by /run and /pi.
@@ -233,9 +241,9 @@ const server = http.createServer((req, res) => {
       // No shell: args are passed as argv, so the message can never break out to
       // the shell. A fresh instance per message, rooted in the workspace so it
       // can actually see the repo it is being asked to act on.
-      streamChild(res, spawn("claude", ["-p", message, "--model", CLAUDE_MODEL, "--permission-mode", CLAUDE_PERMISSION_MODE], {
-        cwd: WORKSPACE, env: piEnv(), stdio: ["ignore", "pipe", "pipe"],
-      }));
+      const argv = ["-p", message, "--model", CLAUDE_MODEL, "--permission-mode", CLAUDE_PERMISSION_MODE];
+      if (CLAUDE_CONTEXT) argv.push("--append-system-prompt", CLAUDE_CONTEXT);
+      streamChild(res, spawn("claude", argv, { cwd: WORKSPACE, env: piEnv(), stdio: ["ignore", "pipe", "pipe"] }));
     });
     return;
   }
