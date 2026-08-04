@@ -122,7 +122,14 @@ const CLAUDE_MODEL = process.env.BRIDGE_CLAUDE_MODEL || "sonnet";
 // nobody to answer a permission prompt, and a headless `claude -p` that stops
 // to ask is useless. The gate is human and upstream — every command is staged
 // into the composer, read, and sent by hand. The denylist below still applies.
-const CLAUDE_PERMISSION_MODE = process.env.BRIDGE_CLAUDE_PERMISSION_MODE || "bypassPermissions";
+const WANTED_PERMISSION_MODE = process.env.BRIDGE_CLAUDE_PERMISSION_MODE || "bypassPermissions";
+// claude refuses bypassPermissions (--dangerously-skip-permissions) when it is
+// running as root, and the Thrivbe-1 service does. Downgrade to the strongest
+// mode root does allow rather than shipping a command interface that errors on
+// every call there: dontAsk still never stops to ask mid-meeting.
+const CLAUDE_PERMISSION_MODE = WANTED_PERMISSION_MODE === "bypassPermissions" && process.getuid?.() === 0
+  ? "dontAsk"
+  : WANTED_PERMISSION_MODE;
 // Startup orientation for every Claude instance: what Fireflies Live is and
 // where the workspace keeps its context. Edited as prose, not code.
 const CLAUDE_CONTEXT_FILE = process.env.BRIDGE_CLAUDE_CONTEXT_FILE || path.resolve(process.cwd(), "server", "claude-context.md");
@@ -451,6 +458,10 @@ const server = http.createServer((req, res) => {
 
 server.listen(PORT, HOST, () => {
   console.log(`[bridge] listening on http://${HOST}:${PORT} (loopback only)`);
+// Surface the effective command-interface config at boot — a silently
+// downgraded permission mode is exactly the kind of thing to find in a log,
+// not mid-meeting.
+console.log(`[bridge] claude: ${CLAUDE_MODEL} in ${WORKSPACE}, permissions=${CLAUDE_PERMISSION_MODE}${CLAUDE_PERMISSION_MODE !== WANTED_PERMISSION_MODE ? ` (downgraded from ${WANTED_PERMISSION_MODE}: running as root)` : ""}, context=${CLAUDE_CONTEXT ? `${CLAUDE_CONTEXT.length} chars` : "none"}`);
 });
 
 // ponytail: denylist is a fat-finger guard, not a sandbox — operator has full
