@@ -153,7 +153,7 @@ export async function fetchSentiment(ctx: string, key: string, model: string): P
 }
 
 // A feed item to add (id:null), refine in place (id = existing item id), or mark done.
-export interface FeedUpdate { id: number | null; type?: FeedType; text: string; status?: "done"; outcome?: string }
+export interface FeedUpdate { id: number | null; type?: FeedType; text: string; status?: "done"; outcome?: string; live?: boolean }
 // `order` is the AI's priority ranking; null when it left priority unchanged (saves tokens).
 export interface FeedResult { items: FeedUpdate[]; order: number[] | null }
 
@@ -164,9 +164,9 @@ export interface FeedOpts { context: string; goal: string; bundleHint: string; m
 // and lets the model rank everything against everything.
 export async function fetchFeed(
   ctx: string, key: string, opts: FeedOpts, model: string,
-  existing: { id: number; type: FeedType; text: string; done?: boolean; votes: number; source: "ai" | "you" }[],
+  existing: { id: number; type: FeedType; text: string; done?: boolean; votes: number; source: "ai" | "you"; live?: boolean }[],
 ): Promise<FeedResult | null> {
-  const list = existing.slice(0, 24).map(item => ({ id: item.id, type: item.type, text: item.text, votes: item.votes, source: item.source, ...(item.done ? { done: true } : {}) }));
+  const list = existing.slice(0, 24).map(item => ({ id: item.id, type: item.type, text: item.text, votes: item.votes, source: item.source, ...(item.done ? { done: true } : {}), ...(item.live === false ? { live: false } : {}) }));
   const sys = `You are Robin's real-time meeting copilot. You maintain ONE priority-ordered live feed for the meeting.
 Item types:
 - "ask": a sharp question Robin could ask right now
@@ -178,12 +178,13 @@ Item types:
 - "branch": a promising conversation direction worth steering into` : ""}
 MEETING: ${opts.meetingTitle || "Meeting"}
 ROBIN'S GOAL: ${opts.goal || "Advance the meeting productively."}${opts.context ? `\nCONTEXT: ${opts.context}` : ""}${opts.bundleHint ? `\nBACKGROUND (Robin's resources):\n${opts.bundleHint}` : ""}
-Current feed as JSON, most important first: ${JSON.stringify(list)}
+Current feed as JSON, most important first ("live":false means it has already fallen out of the moment): ${JSON.stringify(list)}
 Items with "source":"you" were written by Robin himself — that is human intuition and outranks yours: never drop them, never reword them, and keep them high unless the transcript shows they are handled. "votes" is Robin's explicit priority signal. "done" items are already handled.
 Read the latest transcript, then return ONLY changes:
 - Refine an existing item in place with its SAME "id" and better "text" when newer context makes it sharper. Never emit a near-duplicate of an existing item.
 - FOLLOW-THROUGH: if the transcript shows an item was said, done, covered or made irrelevant, return its SAME "id" with "status":"done" and "outcome":"<how it landed, under 12 words>". Never mark done without transcript evidence.
 - Create a NEW item ("id":null) only for a genuinely new idea not already covered.${opts.agenda ? " When the feed has no agenda points yet, seed a few from Robin's goal and the background." : ""}
+- STILL LIVE? For open "ask", "clarify" and "branch" items only, judge whether it could still be raised naturally at THIS moment in the conversation. Return "live":false with its SAME "id" once the conversation has moved past it — the question is not wrong, just no longer of the moment. Return "live":true if a stale one becomes relevant again. Only send "live" when it CHANGES; a new item is assumed live.
 - Omit unchanged items entirely.
 - "order": the full priority ranking of ALL current ids, most important first. Rank by what most advances Robin's goal right now, then time-sensitivity. Include "order" ONLY when the priority actually changed — otherwise omit the key entirely. New items are not in "order" yet (they have no id until the app assigns one); they enter at the top and you rank them on your next pass, so re-rank promptly after adding.
 Each item: {"id":<existing id or null>,"type":"<type>","text":"<under 16 words>"}. A done update needs only "id", "status", "outcome".
@@ -200,6 +201,7 @@ Respond ONLY with {"items":[...]} (plus "order" when it changed). No prose, no m
         id: Number.isInteger(x.id) ? x.id : null,
         ...(FEED_TYPES.includes(x.type) ? { type: x.type as FeedType } : TYPE_MAP[x.type] ? { type: TYPE_MAP[x.type] } : {}),
         text: typeof x.text === "string" ? x.text : "",
+        ...(typeof x.live === "boolean" ? { live: x.live } : {}),
         ...(x.status === "done" ? { status: "done" as const, outcome: String(x.outcome ?? "") } : {}),
       }));
     return { items, order };

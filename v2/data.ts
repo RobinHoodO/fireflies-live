@@ -63,7 +63,7 @@ export const VIEWS = [
 ];
 
 export const TABS = [
-  { id: "feed", l: "Live feed", ic: "i-bulb" }, { id: "chat", l: "Chat", ic: "i-message" }, { id: "pi", l: "PI", ic: "i-terminal" },
+  { id: "feed", l: "Live feed", ic: "i-bulb" }, { id: "chat", l: "Chat", ic: "i-message" }, { id: "pi", l: "Command", ic: "i-terminal" },
 ];
 
 // Feed filter chips — multi-select, none selected = everything. Each carries
@@ -82,6 +82,7 @@ export const FILTERS = [
 export const ADDABLE = [
   { id: "note", l: "Note" }, { id: "topic", l: "Agenda point" }, { id: "ask", l: "Ask" },
   { id: "do", l: "Do" }, { id: "clarify", l: "Clarify" }, { id: "branch", l: "Branch" },
+  { id: "command", l: "Command" },
 ];
 
 export const SUGMETA: Record<string, { kind: string; icon: string; color: string; bg: string }> = {

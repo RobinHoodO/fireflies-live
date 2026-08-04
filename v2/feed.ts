@@ -3,8 +3,11 @@
 // Pure helpers only — the React state lives in App.tsx.
 // .ts extension: this module is also loaded directly by `node --test`.
 import { type FeedType } from "./backend.ts";
+import { hostNodeId, type GraphNode } from "./graph.ts";
 
-export type FeedItem = { id: number; type: FeedType; text: string; t: number; status?: "done"; outcome?: string; votes: number; source: "ai" | "you" };
+// `live` only means something for possibilities (see below): true while the
+// question could still naturally be asked, false once the moment has passed.
+export type FeedItem = { id: number; type: FeedType; text: string; t: number; status?: "done"; outcome?: string; votes: number; source: "ai" | "you"; live?: boolean };
 export type FeedSort = "priority" | "newest" | "oldest" | "type" | "open";
 
 export const FEED_SORTS: FeedSort[] = ["priority", "newest", "oldest", "type", "open"];
@@ -49,4 +52,23 @@ export const FILTER_TYPES: Record<string, FeedType[]> = {
 
 export function matchesFilter(type: FeedType, filter: string) {
   return (FILTER_TYPES[filter] ?? []).includes(type);
+}
+
+// Two kinds of item, and the map treats them differently:
+//
+//   RECORD      — notes, tasks, commands, anything done. These happened at a
+//                 point in the conversation and stay nailed to it. History.
+//   POSSIBILITY — asks, clarifies, branches. These are options still open, so
+//                 while they're live they travel with the conversation and sit
+//                 at wherever we are NOW. The moment we've talked past one, it
+//                 falls back to where it first came up and becomes history too.
+export const POSSIBILITY_TYPES: FeedType[] = ["ask", "clarify", "branch"];
+
+export const isOpenPossibility = (item: FeedItem) =>
+  item.status !== "done" && POSSIBILITY_TYPES.includes(item.type) && item.live !== false;
+
+// Which topic an item hangs off right now.
+export function anchorFor(item: FeedItem, nodes: GraphNode[], tipId: number | null): number | null {
+  if (isOpenPossibility(item) && tipId != null && nodes.some(n => n.id === tipId)) return tipId;
+  return hostNodeId(item.t, nodes);
 }

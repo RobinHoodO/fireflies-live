@@ -113,6 +113,16 @@ function piEnv() {
   return env;
 }
 
+// The command interface runs `claude` headless IN the Thrivbe workspace, so it
+// can see the repo it is being asked to act on. A fresh instance per message —
+// the meeting context travels in the prompt, not in a resumed session.
+const WORKSPACE = process.env.BRIDGE_WORKSPACE || path.dirname(CONTENT_ROOT);
+const CLAUDE_MODEL = process.env.BRIDGE_CLAUDE_MODEL || "sonnet";
+// acceptEdits, not bypassPermissions: the operator reviews and sends every
+// message by hand in the UI, but a transcript-derived instruction should still
+// not get a blank cheque on this machine.
+const CLAUDE_PERMISSION_MODE = process.env.BRIDGE_CLAUDE_PERMISSION_MODE || "acceptEdits";
+
 // Stream a spawned child's stdout/stderr/exit to the NDJSON response, with an output
 // cap and hard timeout. Shared by /run and /pi.
 function streamChild(res, child) {
@@ -218,10 +228,14 @@ const server = http.createServer((req, res) => {
         return;
       }
 
-      await appendFile(AUDIT, `${new Date().toISOString()} PI ${sessionId} ${AUDIT_BODIES ? message.slice(0, 200).replace(/\n/g, " ") : `${Buffer.byteLength(message)} bytes`}\n`).catch(() => {});
-      send(res, { type: "start", cmd: "pi" });
-      // No shell: args are passed as argv, so the message can never break out to the shell.
-      streamChild(res, spawn("pi", ["--print", "--offline", "--session-id", sessionId, message], { env: piEnv(), stdio: ["ignore", "pipe", "pipe"] }));
+      await appendFile(AUDIT, `${new Date().toISOString()} CLAUDE ${sessionId} ${AUDIT_BODIES ? message.slice(0, 200).replace(/\n/g, " ") : `${Buffer.byteLength(message)} bytes`}\n`).catch(() => {});
+      send(res, { type: "start", cmd: `claude (${CLAUDE_MODEL}) in ${WORKSPACE}` });
+      // No shell: args are passed as argv, so the message can never break out to
+      // the shell. A fresh instance per message, rooted in the workspace so it
+      // can actually see the repo it is being asked to act on.
+      streamChild(res, spawn("claude", ["-p", message, "--model", CLAUDE_MODEL, "--permission-mode", CLAUDE_PERMISSION_MODE], {
+        cwd: WORKSPACE, env: piEnv(), stdio: ["ignore", "pipe", "pipe"],
+      }));
     });
     return;
   }
