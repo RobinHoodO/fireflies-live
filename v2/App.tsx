@@ -9,7 +9,7 @@ import { mdToHtml } from "./md";
 import {
   C, MODES, MODELS, MODEL_IDS, FAST_MODELS, FLAGS, VIEWS, TABS, FILTERS, ADDABLE, SUGMETA,
   RATES, EMPTY_STEPS,
-  segBtn, tabBtn, modeChip, filterChip, countBadge, modelRow, track, knob, qBtnStyle, rel,
+  segBtn, tabBtn, modeChip, filterChip, typeChip, viewControl, countBadge, modelRow, track, knob, qBtnStyle, rel,
   type Message,
 } from "./data";
 import {
@@ -19,7 +19,7 @@ import {
 } from "./backend";
 import { packSession, unpackSession, shouldAutoResume } from "./session";
 import { prioritize, applyOrder, sortFeed, matchesFilter, FEED_SORTS, type FeedItem, type FeedSort } from "./feed";
-import { layoutTree, pathToRoot, GRAPH_STATES, type GraphNode } from "./graph";
+import { layoutMycelium, pathToRoot, wobbleOf, GRAPH_STATES, type GraphNode } from "./graph";
 
 // Persisted UI config — survives reloads / new sessions (localStorage).
 const SAVED: any = (() => { try { return JSON.parse(localStorage.getItem("fl-config") || "{}"); } catch { return {}; } })();
@@ -154,6 +154,7 @@ export default function App() {
     : []);
   const [graphCurrent, setGraphCurrent] = useState<number | null>(() => typeof SESSION.graphCurrent === "number" ? SESSION.graphCurrent : null);
   const [pickedNode, setPickedNode] = useState<number | null>(null);
+  const [mapView, setMapView] = useState({ tx: 0, ty: 0, k: 1 });
 
   const splitRowRef = useRef<HTMLDivElement>(null);
   const chatComposerRef = useRef<HTMLTextAreaElement>(null);
@@ -170,6 +171,7 @@ export default function App() {
   const lastGraphRef = useRef(0); const graphSeqRef = useRef(0);
   const graphRef = useRef<GraphNode[]>([]); graphRef.current = graph;
   const graphIdRef = useRef(graph.length ? Math.max(...graph.map(n => n.id)) + 1 : 1);
+  const mapViewportRef = useRef<HTMLDivElement>(null); const mapTouchedRef = useRef(false);
   const constellationErrRef = useRef<number | undefined>(undefined);
   const liveAnswerRef = useRef(""); const sidRef = useRef(feed.length ? Math.max(...feed.map(s => s.id)) + 1 : 1);
   const scriptWordsRef = useRef<string[]>([]); const consumedTranscriptWordsRef = useRef(new Map<string, number>());
@@ -493,6 +495,43 @@ export default function App() {
       : prioritize([...prev, { id: sidRef.current++, type: "branch" as const, text: node.label, votes: 2, source: "you" as const, t: Date.now() }]));
   };
 
+  // Infinite canvas: pan by dragging, zoom toward the pointer. The map auto-
+  // recentres on the growing tip until Robin moves it himself — then it stays
+  // where he put it, because a canvas that yanks itself around mid-meeting is
+  // worse than one that drifts off screen.
+  const recenterMap = () => {
+    const el = mapViewportRef.current;
+    const w = el?.clientWidth ?? 900, h = el?.clientHeight ?? 600;
+    const placed = layoutMycelium(graph);
+    mapTouchedRef.current = false;
+    if (!placed.length) { setMapView({ tx: w / 2, ty: h / 2, k: 1 }); return; }
+    // Fit the whole colony, with room for the labels that hang off each node.
+    const LABEL = 190;
+    const minX = Math.min(...placed.map(p => p.x)) - LABEL, maxX = Math.max(...placed.map(p => p.x)) + LABEL;
+    const minY = Math.min(...placed.map(p => p.y)) - 40, maxY = Math.max(...placed.map(p => p.y)) + 40;
+    const k = Math.min(1.1, Math.max(0.28, Math.min(w / (maxX - minX), h / (maxY - minY))));
+    setMapView({ k, tx: w / 2 - ((minX + maxX) / 2) * k, ty: h / 2 - ((minY + maxY) / 2) * k });
+  };
+  useEffect(() => { if (!mapTouchedRef.current) recenterMap(); }, [graph.length, graphCurrent, view]); // eslint-disable-line react-hooks/exhaustive-deps
+  const startMapPan = (e: React.MouseEvent) => {
+    e.preventDefault();
+    mapTouchedRef.current = true;
+    const start = { x: e.clientX, y: e.clientY, tx: mapView.tx, ty: mapView.ty };
+    const move = (ev: MouseEvent) => setMapView(v => ({ ...v, tx: start.tx + (ev.clientX - start.x), ty: start.ty + (ev.clientY - start.y) }));
+    const up = () => { document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up); };
+    document.addEventListener("mousemove", move); document.addEventListener("mouseup", up);
+  };
+  const zoomMap = (e: React.WheelEvent) => {
+    mapTouchedRef.current = true;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const px = e.clientX - rect.left, py = e.clientY - rect.top;
+    setMapView(v => {
+      const k = Math.min(2.6, Math.max(0.25, v.k * Math.exp(-e.deltaY * 0.0016)));
+      // Keep the point under the cursor pinned while the scale changes.
+      return { k, tx: px - (px - v.tx) * (k / v.k), ty: py - (py - v.ty) * (k / v.k) };
+    });
+  };
+
   const refreshNav = () => { lastNavRef.current = 0; runNav(); };
   // Manual override for the slow Say-this cadence — redraft now.
   const redraftAnswer = () => { lastAnswerRef.current = 0; liveAnswerRef.current = ""; setRedraftTick(n => n + 1); };
@@ -688,7 +727,7 @@ export default function App() {
       `Status: ${statusLabel}`,
       `\n## Transcript\n${transcript}`,
       agendaMd ? `\n## Agenda (priority order)\n${agendaMd}` : "",
-      graph.length ? `\n## Conversation map\n${layoutTree(graph).sort((a, b) => a.depth - b.depth || a.row - b.row).map(n => `${"  ".repeat(n.depth)}- ${n.label} — ${n.state}`).join("\n")}\n\nBranches not taken: ${graph.filter(n => n.state === "open").map(n => n.label).join(" · ") || "none"}` : "",
+      graph.length ? `\n## Conversation map\n${layoutMycelium(graph).sort((a, b) => a.depth - b.depth || a.angle - b.angle).map(n => `${"  ".repeat(n.depth)}- ${n.label} — ${n.state}`).join("\n")}\n\nBranches not taken: ${graph.filter(n => n.state === "open").map(n => n.label).join(" · ") || "none"}` : "",
       `\n## Live Feed\n${liveFeed}`,
       liveAnswer ? `\n## Question Mode Draft\n${liveAnswer}` : "",
       navFrame ? `\n## Navigator\nPhase: ${navFrame.phase} · Stance: ${navFrame.stance} · Progress: ${navFrame.goal_progress} · Next move: ${navFrame.next_move} · Risk: ${navFrame.risk}` : "",
@@ -1001,23 +1040,37 @@ export default function App() {
     <section style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", minHeight: 0 }}>
       {sectionLabel("i-bulb", "Live feed", <span style={{ fontSize: 12, fontWeight: 600, color: "oklch(0.6 0.015 255)" }}>{visibleFeed.length}/{feed.length}</span>)}
       <div style={{ marginTop: 16, display: "flex", flexDirection: "column", flex: "1 1 auto", minHeight: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 12.5, color: "oklch(0.55 0.015 255)", fontWeight: 600 }}><Icon id="i-gauge" size={15} />Pulse rate</span>
-          <div style={{ flex: "1 1 auto" }} />
-          <select value={rate} onChange={e => setRate(e.target.value)} className="fl-focus" style={{ appearance: "none", WebkitAppearance: "none", padding: "9px 38px 9px 14px", border: `1px solid ${BORDER}`, borderRadius: 10, background: "#fff url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E\") no-repeat right 12px center", fontFamily: "inherit", fontSize: 13, fontWeight: 600, color: "oklch(0.3 0.02 255)", cursor: "pointer", outline: "none" }}>
-            {RATES.map(r => <option key={r.v} value={r.v}>{r.l}</option>)}
-          </select>
+        {/* SHOW — which kinds of item. Each chip wears its type's own colour,
+            so the filter row and the list read as one taxonomy. */}
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 7, marginBottom: 10 }}>
+          <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "oklch(0.68 0.012 255)", marginRight: 3 }}>Show</span>
+          <button onClick={() => setFilters([])} style={{ ...typeChip(filters.length === 0, C.text, C.tint, false), fontWeight: 700 }}>All<span style={countBadge(filters.length === 0)}>{feed.length}</span></button>
+          {FILTERS.map(f => { const active = filters.includes(f.id); return (
+            <button key={f.id} onClick={() => toggleFilter(f.id)} title={`${active ? "Hide" : "Show"} ${f.l.toLowerCase()} items`} style={typeChip(active, f.color, f.bg, counts[f.id] === 0)}>
+              <Icon id={f.ic} size={13} stroke={active ? f.color : "oklch(0.6 0.015 255)"} />{f.l}<span style={countBadge(active)}>{counts[f.id]}</span>
+            </button>
+          ); })}
         </div>
-        <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 9, marginBottom: 14 }}>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 9, flex: "1 1 auto" }}>
-            <button onClick={() => setFilters([])} style={filterChip(filters.length === 0)}>All<span style={countBadge(filters.length === 0)}>{feed.length}</span></button>
-            {FILTERS.map(f => { const active = filters.includes(f.id); return (
-              <button key={f.id} onClick={() => toggleFilter(f.id)} style={filterChip(active)}>{f.l}<span style={countBadge(active)}>{counts[f.id]}</span></button>
-            ); })}
-            <button onClick={() => setHideDone(d => !d)} title="Hide items already handled" style={filterChip(hideDone)}>{hideDone ? "✓ " : ""}Hide done</button>
-          </div>
-          <select value={feedSort} onChange={e => setFeedSort(e.target.value as FeedSort)} className="fl-focus" aria-label="Sort live feed" style={{ appearance: "none", WebkitAppearance: "none", padding: "8px 30px 8px 11px", border: `1px solid ${BORDER}`, borderRadius: 10, background: "#fff url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E\") no-repeat right 9px center", fontFamily: "inherit", fontSize: 12, fontWeight: 600, color: "oklch(0.3 0.02 255)", cursor: "pointer", outline: "none" }}>
-            <option value="priority">Priority</option><option value="newest">Newest</option><option value="oldest">Oldest</option><option value="type">Type</option><option value="open">Open first</option>
+        {/* VIEW — how the same items are ordered and trimmed. Deliberately one
+            neutral weight below the coloured chips: ordering is not a taxonomy. */}
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 7, marginBottom: 14 }}>
+          <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "oklch(0.68 0.012 255)", marginRight: 3 }}>Sort</span>
+          <select value={feedSort} onChange={e => setFeedSort(e.target.value as FeedSort)} className="fl-focus" aria-label="Sort live feed"
+            style={{ ...viewControl(feedSort !== "priority"), appearance: "none", WebkitAppearance: "none", paddingRight: 26, outline: "none", backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E\")", backgroundRepeat: "no-repeat", backgroundPosition: "right 7px center" }}>
+            <option value="priority">Priority — votes first</option>
+            <option value="newest">Newest first</option>
+            <option value="oldest">Oldest first</option>
+            <option value="type">Grouped by type</option>
+            <option value="open">Unhandled first</option>
+          </select>
+          <button onClick={() => setHideDone(d => !d)} title="Hide items already handled" style={viewControl(hideDone)}>
+            <Icon id={hideDone ? "i-check" : "i-x"} size={13} />Hide done
+          </button>
+          <div style={{ flex: "1 1 auto" }} />
+          <span title="How often the AI re-reads the conversation" style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "oklch(0.68 0.012 255)" }}><Icon id="i-gauge" size={13} />Pulse</span>
+          <select value={rate} onChange={e => setRate(e.target.value)} className="fl-focus" aria-label="Pulse rate"
+            style={{ ...viewControl(rate === "off"), appearance: "none", WebkitAppearance: "none", paddingRight: 26, outline: "none", backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E\")", backgroundRepeat: "no-repeat", backgroundPosition: "right 7px center" }}>
+            {RATES.map(r => <option key={r.v} value={r.v}>{r.l}</option>)}
           </select>
         </div>
         {!orKey && <div style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 11.5, fontWeight: 600, color: "oklch(0.6 0.015 255)", marginBottom: 14 }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: "oklch(0.78 0.14 75)" }} />AI offline — set OPENROUTER_API</div>}
@@ -1094,75 +1147,86 @@ export default function App() {
 
   // ── EXPERIMENT: conversation map view ─────────────────────────────
   const mapCard = (() => {
-    const placed = layoutTree(graph);
+    const placed = layoutMycelium(graph);
     const spine = new Set(pathToRoot(graph, graphCurrent));
-    const COL = 240, ROW = 62, PAD = 40, NODE_W = 190, NODE_H = 40;
-    const depth = Math.max(0, ...placed.map(p => p.depth));
-    const rows = Math.max(0, ...placed.map(p => p.row));
-    const width = PAD * 2 + depth * COL + NODE_W;
-    const height = PAD * 2 + rows * ROW + NODE_H;
-    const at = (p: typeof placed[number]) => ({ x: PAD + p.depth * COL, y: PAD + p.row * ROW });
-    const STATE: Record<string, { fill: string; stroke: string; text: string; dash?: string }> = {
-      active: { fill: "var(--ac)", stroke: "var(--ac)", text: "#fff" },
-      explored: { fill: "#fff", stroke: "oklch(0.84 0.08 242)", text: "oklch(0.3 0.02 255)" },
-      open: { fill: "oklch(0.97 0.04 75)", stroke: "oklch(0.78 0.12 75)", text: "oklch(0.45 0.12 70)", dash: "5 4" },
-      dropped: { fill: "oklch(0.975 0.004 250)", stroke: "oklch(0.9 0.006 255)", text: "oklch(0.68 0.012 255)", dash: "2 4" },
+    const at = new Map(placed.map(p => [p.id, p]));
+    const STATE: Record<string, { fill: string; stroke: string; text: string; hypha: string; dashed?: boolean }> = {
+      active: { fill: "var(--ac)", stroke: "var(--ac)", text: "oklch(0.27 0.025 255)", hypha: "var(--ac)" },
+      explored: { fill: "#fff", stroke: "oklch(0.7 0.1 242)", text: "oklch(0.34 0.02 255)", hypha: "oklch(0.82 0.05 242)" },
+      open: { fill: "oklch(0.97 0.05 75)", stroke: "oklch(0.72 0.14 70)", text: "oklch(0.45 0.12 70)", hypha: "oklch(0.8 0.11 75)", dashed: true },
+      dropped: { fill: "oklch(0.97 0.004 250)", stroke: "oklch(0.85 0.008 255)", text: "oklch(0.68 0.012 255)", hypha: "oklch(0.9 0.006 255)", dashed: true },
     };
     const openCount = graph.filter(n => n.state === "open").length;
+    const radiusOf = (p: typeof placed[number]) => p.state === "active" ? 11 : p.depth === 0 ? 9 : 7;
     return (
       <div style={{ ...cardBase, flex: "1 1 auto", minWidth: 0 }}>
         <div style={{ padding: "24px 28px", display: "flex", alignItems: "center", gap: 14, flex: "0 0 auto", borderBottom: "1px solid oklch(0.95 0.005 250)" }}>
           <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 40, height: 40, borderRadius: 11, background: "var(--ac-tint)", flex: "0 0 auto" }}><Icon id="i-command" size={19} stroke="var(--ac)" /></span>
           <div style={{ minWidth: 0, flex: "1 1 auto" }}>
             <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 17, fontWeight: 700, color: "oklch(0.27 0.025 255)", letterSpacing: "-0.01em" }}>Conversation map <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 7px", borderRadius: 999, background: "oklch(0.96 0.03 290)", color: "oklch(0.52 0.15 290)", verticalAlign: "2px" }}>EXPERIMENT</span></div>
-            <div style={{ fontSize: 13, color: "oklch(0.6 0.015 255)", marginTop: 2 }}>{graph.length} topics · {openCount} branch{openCount === 1 ? "" : "es"} not taken</div>
+            <div style={{ fontSize: 13, color: "oklch(0.6 0.015 255)", marginTop: 2 }}>{graph.length} topics · {openCount} branch{openCount === 1 ? "" : "es"} not taken · drag to pan, scroll to zoom</div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 14, flex: "0 0 auto", fontSize: 12 }}>
             {[["active", "here now"], ["explored", "walked"], ["open", "not taken"], ["dropped", "dropped"]].map(([k, l]) => (
               <span key={k} style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "oklch(0.5 0.02 255)" }}>
-                <span style={{ width: 11, height: 11, borderRadius: 3, background: STATE[k].fill, border: `1.5px ${STATE[k].dash ? "dashed" : "solid"} ${STATE[k].stroke}` }} />{l}
+                <span style={{ width: 11, height: 11, borderRadius: "50%", background: STATE[k].fill, border: `1.5px ${STATE[k].dashed ? "dashed" : "solid"} ${STATE[k].stroke}` }} />{l}
               </span>
             ))}
-            <button onClick={() => { lastGraphRef.current = 0; runGraph(); }} title="Redraw the map now" className="fl-hover-soft" style={{ ...iconBtn, width: 34, height: 34 }}><Icon id="i-refresh" size={16} /></button>
+            <button onClick={recenterMap} title="Recentre on the living tip" className="fl-hover-soft" style={{ ...iconBtn, width: 34, height: 34 }}><Icon id="i-search" size={16} /></button>
+            <button onClick={() => { lastGraphRef.current = 0; runGraph(); }} title="Grow the map now" className="fl-hover-soft" style={{ ...iconBtn, width: 34, height: 34 }}><Icon id="i-refresh" size={16} /></button>
           </div>
         </div>
-        <div className="fl-scroll" style={{ flex: "1 1 auto", minHeight: 0, overflow: "auto" }}>
+        <div ref={mapViewportRef} style={{ flex: "1 1 auto", minHeight: 0, overflow: "hidden", position: "relative", background: "radial-gradient(900px 600px at 50% 40%, var(--ac-tint), transparent 70%)" }}>
           {placed.length === 0 ? (
-            <div style={{ height: "100%", minHeight: 420, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", padding: 48, gap: 12 }}>
+            <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", padding: 48, gap: 12 }}>
               <Icon id="i-command" size={34} stroke="oklch(0.8 0.01 255)" />
-              <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 19, fontWeight: 700, color: "oklch(0.4 0.02 255)" }}>The tree grows once you connect</div>
-              <div style={{ fontSize: 14, lineHeight: 1.6, color: "oklch(0.58 0.015 255)", maxWidth: 460 }}>Every topic becomes a node. Directions that come up but nobody follows stay on the map as dashed branches — click one to walk back onto it.</div>
+              <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 19, fontWeight: 700, color: "oklch(0.4 0.02 255)" }}>The colony grows once you connect</div>
+              <div style={{ fontSize: 14, lineHeight: 1.6, color: "oklch(0.58 0.015 255)", maxWidth: 460 }}>Every topic sprouts a node and creeps outward. Directions that come up but nobody follows stay as dashed filaments — click one to walk back onto it.</div>
             </div>
           ) : (
-            <svg width={width} height={height} style={{ display: "block", minWidth: "100%" }}>
-              {placed.map(p => {
-                const parent = placed.find(x => x.id === p.parent);
-                if (!parent) return null;
-                const a = at(parent), b = at(p);
-                const x1 = a.x + NODE_W, y1 = a.y + NODE_H / 2, x2 = b.x, y2 = b.y + NODE_H / 2;
-                const onSpine = spine.has(p.id) && spine.has(parent.id);
-                return <path key={`e${p.id}`} d={`M${x1},${y1} C${x1 + COL / 3},${y1} ${x2 - COL / 3},${y2} ${x2},${y2}`} fill="none"
-                  stroke={onSpine ? "var(--ac)" : p.state === "open" ? "oklch(0.82 0.1 75)" : "oklch(0.88 0.008 255)"}
-                  strokeWidth={onSpine ? 2.4 : 1.5} strokeDasharray={p.state === "open" || p.state === "dropped" ? "5 4" : undefined} />;
-              })}
-              {placed.map(p => {
-                const s = STATE[p.state] ?? STATE.explored;
-                const { x, y } = at(p);
-                const walkable = p.state === "open" || p.state === "dropped";
-                return (
-                  <g key={p.id} onClick={walkable ? () => pickUpBranch(p) : undefined} style={{ cursor: walkable ? "pointer" : "default" }}>
-                    <title>{walkable ? `Walk back onto: ${p.label}` : p.label}</title>
-                    <rect x={x} y={y} width={NODE_W} height={NODE_H} rx={11} fill={s.fill} stroke={pickedNode === p.id ? "var(--ac)" : s.stroke} strokeWidth={pickedNode === p.id ? 2.5 : 1.5} strokeDasharray={s.dash} />
-                    <text x={x + 13} y={y + NODE_H / 2 + 4.5} fill={s.text} fontSize="12.5" fontWeight={p.state === "active" ? 700 : 600} fontFamily="inherit">
-                      {p.label.length > 26 ? `${p.label.slice(0, 25)}…` : p.label}
-                    </text>
-                  </g>
-                );
-              })}
+            <svg className="fl-map-canvas" width="100%" height="100%" onMouseDown={startMapPan} onWheel={zoomMap} style={{ display: "block", position: "absolute", inset: 0 }}>
+              <g transform={`translate(${mapView.tx},${mapView.ty}) scale(${mapView.k})`}>
+                {placed.map(p => {
+                  const parent = p.parent == null ? undefined : at.get(p.parent);
+                  if (!parent) return null;
+                  const s = STATE[p.state] ?? STATE.explored;
+                  const onSpine = spine.has(p.id) && spine.has(parent.id);
+                  // Bow the filament sideways so it creeps rather than points.
+                  const mx = (parent.x + p.x) / 2, my = (parent.y + p.y) / 2;
+                  const bow = (wobbleOf(p.id) - 0.5) * 60;
+                  const nx = -(p.y - parent.y), ny = p.x - parent.x;
+                  const len = Math.hypot(nx, ny) || 1;
+                  return <path key={`e${p.id}`} className="fl-hypha"
+                    d={`M${parent.x},${parent.y} Q${mx + (nx / len) * bow},${my + (ny / len) * bow} ${p.x},${p.y}`}
+                    fill="none" stroke={onSpine ? "var(--ac)" : s.hypha} strokeWidth={onSpine ? 2.6 : 1.6} strokeLinecap="round"
+                    strokeDasharray={s.dashed ? "6 5" : undefined}
+                    style={s.dashed ? undefined : { ["--len" as string]: 900, strokeDasharray: 900 }} />;
+                })}
+                {placed.map(p => {
+                  const s = STATE[p.state] ?? STATE.explored;
+                  const walkable = p.state === "open" || p.state === "dropped";
+                  const r = radiusOf(p);
+                  const flip = Math.cos(p.angle) < -0.2; // label on the inside of the ring
+                  return (
+                    <g key={p.id} className={walkable ? "fl-walkable" : undefined} onClick={walkable ? () => pickUpBranch(p) : undefined}>
+                      <title>{walkable ? `Walk back onto: ${p.label}` : p.label}</title>
+                      {p.state === "active" && <circle cx={p.x} cy={p.y} r={r + 4} fill="var(--ac)" opacity={0.35} style={{ animation: "fl-halo 2.8s ease-out infinite", transformBox: "fill-box", transformOrigin: "center" }} />}
+                      <circle className={p.state === "active" ? "fl-node fl-tip" : "fl-node"} cx={p.x} cy={p.y} r={r}
+                        fill={s.fill} stroke={pickedNode === p.id ? "var(--ac)" : s.stroke} strokeWidth={pickedNode === p.id ? 3 : 2}
+                        strokeDasharray={s.dashed ? "3 3" : undefined} />
+                      <text className="fl-node-label" x={flip ? p.x - r - 8 : p.x + r + 8} y={p.y + 4} textAnchor={flip ? "end" : "start"}
+                        fill={s.text} fontSize="12.5" fontWeight={p.state === "active" ? 700 : 600} fontFamily="inherit"
+                        stroke="#fff" strokeWidth={3.5} paintOrder="stroke" strokeLinejoin="round">
+                        {p.label.length > 24 ? `${p.label.slice(0, 23)}…` : p.label}
+                      </text>
+                    </g>
+                  );
+                })}
+              </g>
             </svg>
           )}
         </div>
-        {openCount > 0 && <div style={{ padding: "12px 28px", borderTop: "1px solid oklch(0.95 0.005 250)", fontSize: 12.5, color: "oklch(0.55 0.015 255)" }}>Click a dashed branch to walk back onto it — it becomes the live topic and jumps to the top of your feed.</div>}
+        {openCount > 0 && <div style={{ padding: "12px 28px", borderTop: "1px solid oklch(0.95 0.005 250)", fontSize: 12.5, color: "oklch(0.55 0.015 255)" }}>Click a dashed filament to walk back onto it — it becomes the live topic and jumps to the top of your feed.</div>}
       </div>
     );
   })();

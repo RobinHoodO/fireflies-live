@@ -2,7 +2,7 @@
 // (topic/clarify/branch) are ONE list with one priority ladder.
 // Pure helpers only — the React state lives in App.tsx.
 // .ts extension: this module is also loaded directly by `node --test`.
-import { AGENDA_TYPES, type FeedType } from "./backend.ts";
+import { type FeedType } from "./backend.ts";
 
 export type FeedItem = { id: number; type: FeedType; text: string; t: number; status?: "done"; outcome?: string; votes: number; source: "ai" | "you" };
 export type FeedSort = "priority" | "newest" | "oldest" | "type" | "open";
@@ -39,7 +39,14 @@ export function sortFeed(items: FeedItem[], sort: FeedSort) {
   });
 }
 
-// "agenda" is a group chip covering the three agenda kinds.
+// Which item types each filter chip covers. "Agenda" groups the points to
+// cover; "Branch" is its own chip because a direction worth steering into is a
+// different decision from a point to get through.
+export const FILTER_TYPES: Record<string, FeedType[]> = {
+  ask: ["ask"], do: ["do"], note: ["note"], command: ["command"],
+  agenda: ["topic", "clarify"], branch: ["branch"],
+};
+
 export function matchesFilter(type: FeedType, filter: string) {
-  return filter === "agenda" ? (AGENDA_TYPES as string[]).includes(type) : type === filter;
+  return (FILTER_TYPES[filter] ?? []).includes(type);
 }

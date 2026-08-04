@@ -66,11 +66,16 @@ export const TABS = [
   { id: "feed", l: "Live feed", ic: "i-bulb" }, { id: "chat", l: "Chat", ic: "i-message" }, { id: "pi", l: "PI", ic: "i-terminal" },
 ];
 
-// Feed filter chips. "agenda" is a group chip covering the three agenda kinds;
-// chips are multi-select (none selected = everything).
+// Feed filter chips — multi-select, none selected = everything. Each carries
+// the icon and colour of the items it shows, so the chip row and the list read
+// as one system. Types per chip live in feed.ts FILTER_TYPES.
 export const FILTERS = [
-  { id: "ask", l: "Ask" }, { id: "do", l: "Do" }, { id: "note", l: "Note" },
-  { id: "command", l: "Command" }, { id: "agenda", l: "Agenda" },
+  { id: "ask", l: "Ask", ic: "i-help", color: "oklch(0.55 0.16 242)", bg: "oklch(0.965 0.03 242)" },
+  { id: "do", l: "Do", ic: "i-zap", color: "oklch(0.5 0.14 155)", bg: "oklch(0.96 0.04 155)" },
+  { id: "note", l: "Note", ic: "i-bulb", color: "oklch(0.6 0.12 70)", bg: "oklch(0.97 0.04 75)" },
+  { id: "command", l: "Command", ic: "i-terminal", color: "oklch(0.52 0.15 290)", bg: "oklch(0.96 0.03 290)" },
+  { id: "agenda", l: "Agenda", ic: "i-arrow", color: "oklch(0.45 0.17 242)", bg: "oklch(0.93 0.05 242)" },
+  { id: "branch", l: "Branch", ic: "i-command", color: "oklch(0.5 0.15 320)", bg: "oklch(0.96 0.03 320)" },
 ];
 
 // Types Robin can add by hand from the feed composer.
@@ -109,7 +114,25 @@ export const segBtn = (active: boolean): CSSProperties => ({ display: "inline-fl
 export const tabBtn = (active: boolean): CSSProperties => ({ flex: "1 1 0", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8, padding: 10, borderRadius: 9, border: "none", fontFamily: "inherit", fontSize: 13.5, fontWeight: 600, cursor: "pointer", transition: "all .15s", background: active ? "#fff" : "transparent", color: active ? "oklch(0.27 0.025 255)" : "oklch(0.52 0.02 255)", boxShadow: active ? "0 1px 2px rgba(16,24,40,.12)" : "none" });
 export const modeChip = (active: boolean): CSSProperties => ({ display: "inline-flex", alignItems: "center", gap: 7, padding: "11px 16px", borderRadius: 11, fontFamily: "inherit", fontSize: 13.5, fontWeight: 600, lineHeight: 1, cursor: "pointer", whiteSpace: "nowrap", transition: "all .15s", border: "1px solid " + (active ? C.border : "oklch(0.91 0.006 255)"), background: active ? C.tint : "#fff", color: active ? C.text : "oklch(0.4 0.02 255)" });
 export const filterChip = (active: boolean): CSSProperties => ({ display: "inline-flex", alignItems: "center", gap: 7, padding: "8px 15px", borderRadius: 999, fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, cursor: "pointer", transition: "all .15s", border: "1px solid " + (active ? C.border : "oklch(0.92 0.006 255)"), background: active ? C.tint : "#fff", color: active ? C.text : "oklch(0.5 0.02 255)" });
+// A type chip wears its own type's colour when on — so the row of chips and the
+// list below it are visibly the same taxonomy. Empty types dim, never vanish:
+// a disappearing control is worse than a quiet one.
+export const typeChip = (active: boolean, color: string, bg: string, empty: boolean): CSSProperties => ({
+  display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 12px", borderRadius: 999,
+  fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, cursor: "pointer", transition: "all .15s", whiteSpace: "nowrap",
+  border: "1px solid " + (active ? color : "oklch(0.92 0.006 255)"),
+  background: active ? bg : "#fff", color: active ? color : "oklch(0.5 0.02 255)",
+  opacity: !active && empty ? 0.45 : 1,
+});
 export const countBadge = (active: boolean): CSSProperties => ({ fontSize: 11, fontWeight: 700, padding: "1px 7px", borderRadius: 999, background: active ? "#fff" : "oklch(0.96 0.005 250)", color: active ? C.text : "oklch(0.55 0.015 255)" });
+// Small neutral control (sort select, toggles) — one visual weight, so view
+// controls never compete with the type filters for attention.
+export const viewControl = (active = false): CSSProperties => ({
+  display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 11px", borderRadius: 9,
+  fontFamily: "inherit", fontSize: 12, fontWeight: 600, cursor: "pointer", transition: "all .15s", whiteSpace: "nowrap",
+  border: "1px solid " + (active ? C.border : "oklch(0.92 0.006 255)"),
+  background: active ? C.tint : "oklch(0.985 0.004 250)", color: active ? C.text : "oklch(0.45 0.02 255)",
+});
 export const modelRow = (active: boolean): CSSProperties => ({ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, width: "100%", padding: "13px 16px", borderRadius: 12, fontFamily: "inherit", fontSize: 14, fontWeight: 600, cursor: "pointer", textAlign: "left", transition: "all .15s", border: "1px solid " + (active ? C.border : "oklch(0.92 0.006 255)"), background: active ? C.tint : "#fff", color: active ? C.text : "oklch(0.32 0.018 255)" });
 export const track = (active: boolean): CSSProperties => ({ position: "relative", display: "inline-block", width: 42, height: 24, borderRadius: 999, flex: "0 0 auto", transition: "background .18s", background: active ? C.ac : "oklch(0.87 0.006 255)" });
 export const knob = (active: boolean): CSSProperties => ({ position: "absolute", top: 3, left: active ? 21 : 3, width: 18, height: 18, borderRadius: "50%", background: "#fff", transition: "left .18s", boxShadow: "0 1px 3px rgba(16,24,40,.3)" });
