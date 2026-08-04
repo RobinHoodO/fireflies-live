@@ -146,7 +146,7 @@ export default function App() {
   const [navBusy, setNavBusy] = useState(false);
   const [sentiments, setSentiments] = useState<SentimentPoint[]>([]);
 
-  const splitElRef = useRef<HTMLDivElement>(null);
+  const splitRowRef = useRef<HTMLDivElement>(null);
   const chatComposerRef = useRef<HTMLTextAreaElement>(null);
   const connRef = useRef<{ connect: () => Promise<void>; disconnect: () => void } | null>(null);
   // Counters re-seed past restored ids — a post-resume line/suggestion must
@@ -231,12 +231,10 @@ export default function App() {
   const { ref: transcriptScrollRef, onScroll: onTranscriptScroll, stick: stickTranscript } = useStickToBottom();
   const { ref: chatPanelScrollRef, onScroll: onChatPanelScroll, stick: stickChatPanel } = useStickToBottom();
   const { ref: piPanelScrollRef, onScroll: onPiPanelScroll, stick: stickPiPanel } = useStickToBottom();
-  const { ref: chatViewScrollRef, onScroll: onChatViewScroll, stick: stickChatView } = useStickToBottom();
 
   useLayoutEffect(() => { stickTranscript(); }, [lines, liveAnswer, stickTranscript]);
   useLayoutEffect(() => { stickChatPanel(); }, [messages, thinking, stickChatPanel]);
   useLayoutEffect(() => { stickPiPanel(); }, [piMessages, piThinking, stickPiPanel]);
-  useLayoutEffect(() => { stickChatView(); }, [messages, thinking, stickChatView]);
 
   // ── boot: keys, meetings, bridge health ──────────────────────────
   useEffect(() => { fetchKeys().then(k => { setFfKey(k.ffKey); setOrKey(k.orKey); setBridgeToken(k.bridgeToken); }); }, []);
@@ -634,7 +632,10 @@ export default function App() {
 
   const startDrag = (e: React.MouseEvent) => {
     e.preventDefault();
-    const move = (ev: MouseEvent) => { const el = splitElRef.current; if (!el) return; const r = el.getBoundingClientRect(); let ratio = (ev.clientX - r.left) / r.width; ratio = Math.min(0.74, Math.max(0.34, ratio)); setSplitRatio(ratio); };
+    // Measure the ROW, not the transcript pane — measuring the pane made the
+    // ratio relative to its own (shrinking) width, so the first drag snapped to
+    // the 0.74 clamp and the divider felt stuck.
+    const move = (ev: MouseEvent) => { const el = splitRowRef.current; if (!el) return; const r = el.getBoundingClientRect(); let ratio = (ev.clientX - r.left) / r.width; ratio = Math.min(0.74, Math.max(0.34, ratio)); setSplitRatio(ratio); };
     const up = () => { document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up); document.body.style.cursor = ""; document.body.style.userSelect = ""; };
     document.addEventListener("mousemove", move); document.addEventListener("mouseup", up);
     document.body.style.cursor = "col-resize"; document.body.style.userSelect = "none";
@@ -968,21 +969,23 @@ export default function App() {
     </section>
   );
 
+  // Chat + PI fill their card (same pattern as the feed) so they look right both
+  // in the narrow split sidebar and full-width in Chat view.
   const chatPanel = (
-    <section style={{ display: "flex", flexDirection: "column" }}>
+    <section style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", minHeight: 0 }}>
       {sectionLabel("i-message", "AI assistant", !orKey ? <span style={{ fontSize: 11.5, fontWeight: 600, color: "oklch(0.6 0.015 255)" }}>offline</span> : undefined)}
-      <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 18 }}>
-        <div ref={chatPanelScrollRef} onScroll={onChatPanelScroll} className="fl-scroll" style={{ display: "flex", flexDirection: "column", gap: 20, maxHeight: "min(56vh, 540px)", overflowY: "auto", paddingRight: 4 }}>{renderThread(messages, thinking)}</div>
+      <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 18, flex: "1 1 auto", minHeight: 0 }}>
+        <div ref={chatPanelScrollRef} onScroll={onChatPanelScroll} className="fl-scroll" style={{ display: "flex", flexDirection: "column", gap: 20, flex: "1 1 auto", minHeight: 0, overflowY: "auto", paddingRight: 4 }}>{renderThread(messages, thinking)}</div>
         {renderComposer(chatInput, setChatInput, sendChat, "Ask anything about the meeting…", chatComposerRef)}
       </div>
     </section>
   );
 
   const piPanel = (
-    <section style={{ display: "flex", flexDirection: "column" }}>
+    <section style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", minHeight: 0 }}>
       {sectionLabel("i-terminal", "PI", <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 600, color: "oklch(0.6 0.015 255)" }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: bridgeOnline ? "oklch(0.68 0.16 155)" : "oklch(0.7 0.01 250)" }} />{bridgeOnline ? "online" : "offline"}</span>)}
-      <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 18 }}>
-        <div ref={piPanelScrollRef} onScroll={onPiPanelScroll} className="fl-scroll" style={{ display: "flex", flexDirection: "column", gap: 20, maxHeight: "min(56vh, 540px)", overflowY: "auto", paddingRight: 4 }}>{renderThread(piMessages, piThinking)}</div>
+      <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 18, flex: "1 1 auto", minHeight: 0 }}>
+        <div ref={piPanelScrollRef} onScroll={onPiPanelScroll} className="fl-scroll" style={{ display: "flex", flexDirection: "column", gap: 20, flex: "1 1 auto", minHeight: 0, overflowY: "auto", paddingRight: 4 }}>{renderThread(piMessages, piThinking)}</div>
         {renderComposer(piInput, setPiInput, submitPI, "Message PI — ask, or run a command…")}
       </div>
     </section>
@@ -990,30 +993,15 @@ export default function App() {
 
   const sidebarCard = (
     <div className="fl-scroll" style={{ ...cardBase, flex: "1 1 0", minWidth: 380, overflowY: "auto", overflowX: "hidden" }}>
-      <div style={{ display: "flex", flexDirection: "column", padding: 26, gap: 20, flex: "1 1 auto", minHeight: 0 }}>
+      {/* Centred cap in Chat view — full-width text lines are hard to read (the
+          old chat-only view capped at 820). No effect in the split sidebar. */}
+      <div style={{ display: "flex", flexDirection: "column", padding: 26, gap: 20, flex: "1 1 auto", minHeight: 0, width: "100%", ...(isChat ? { maxWidth: 1080, margin: "0 auto" } : {}) }}>
         <div style={{ display: "flex", gap: 5, padding: 5, background: "oklch(0.97 0.005 250)", border: "1px solid oklch(0.92 0.006 255)", borderRadius: 13 }}>
           {TABS.map(t => <button key={t.id} onClick={() => setTab(t.id as any)} style={tabBtn(tab === t.id)}><Icon id={t.ic} size={15} />{t.l}</button>)}
         </div>
         {tab === "feed" && feedPanel}
         {tab === "chat" && chatPanel}
         {tab === "pi" && piPanel}
-      </div>
-    </div>
-  );
-
-  // ── Chat-only view ────────────────────────────────────────────────
-  const chatView = (
-    <div style={{ ...cardBase, flex: "1 1 auto", minWidth: 0 }}>
-      <div style={{ display: "flex", flexDirection: "column", width: "100%", maxWidth: 820, margin: "0 auto", flex: "1 1 auto", minHeight: 0 }}>
-        <div style={{ padding: "30px 40px 18px", display: "flex", alignItems: "center", gap: 13, flex: "0 0 auto" }}>
-          <Icon id="i-sparkles" size={22} stroke="var(--ac)" />
-          <div>
-            <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 18, fontWeight: 700, color: "oklch(0.27 0.025 255)", letterSpacing: "-0.01em" }}>AI assistant</div>
-            <div style={{ fontSize: 13, color: "oklch(0.6 0.015 255)", marginTop: 1 }}>Ask anything about this meeting{!orKey && " · AI offline"}</div>
-          </div>
-        </div>
-        <div ref={chatViewScrollRef} onScroll={onChatViewScroll} className="fl-scroll" style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", padding: "18px 40px 8px" }}>{renderThread(messages, thinking)}</div>
-        <div style={{ padding: "18px 40px 30px", flex: "0 0 auto" }}>{renderComposer(chatInput, setChatInput, sendChat, "Ask anything about the meeting…", chatComposerRef)}</div>
       </div>
     </div>
   );
@@ -1128,10 +1116,12 @@ export default function App() {
       <IconSprite />
       <div style={{ width: "100%", maxWidth: 1660, margin: "0 auto", height: "calc(100vh - 56px)", display: "flex", flexDirection: "column", gap: 18 }}>
         {header}
-        <div style={{ flex: "1 1 auto", minHeight: 0, display: "flex", gap: 18 }}>
-          {isChat ? chatView : (
+        <div ref={splitRowRef} style={{ flex: "1 1 auto", minHeight: 0, display: "flex", gap: 18 }}>
+          {/* Chat view = the assistant panel full-width: feed, chat AND PI —
+              hiding the transcript, not the other two tabs. */}
+          {isChat ? sidebarCard : (
             <>
-              <div ref={splitElRef} style={isSplit ? { flex: `0 0 ${pct}`, minWidth: 0, display: "flex" } : { flex: "1 1 auto", minWidth: 0, display: "flex" }}>{transcriptCard}</div>
+              <div style={isSplit ? { flex: `0 0 ${pct}`, minWidth: 0, display: "flex" } : { flex: "1 1 auto", minWidth: 0, display: "flex" }}>{transcriptCard}</div>
               {isSplit && (
                 <>
                   <div className="fl-divider" onMouseDown={startDrag} style={{ flex: "0 0 auto", width: 14, display: "flex", alignItems: "center", justifyContent: "center", cursor: "col-resize", margin: "0 -7px", zIndex: 20 }}>
