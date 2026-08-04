@@ -106,6 +106,67 @@ export function layoutMycelium(nodes: GraphNode[]): PlacedNode[] {
   return placed;
 }
 
+// ONE tree, always. A conversation starts somewhere, and everything that
+// follows grew out of what came before — a floating island would be a lie about
+// how the meeting went. The earliest node is the trunk; anything the model
+// leaves parentless is grafted onto where the conversation actually was when it
+// came up (the live tip), falling back to the trunk.
+export function graftOrphans(nodes: GraphNode[], tipId: number | null = null): GraphNode[] {
+  if (nodes.length < 2) return nodes.map(n => n.parent == null ? n : { ...n, parent: null });
+  const byId = new Map(nodes.map(n => [n.id, n]));
+  const trunk = [...nodes].sort((a, b) => a.t - b.t || a.id - b.id)[0];
+
+  // Grafting a node onto its own descendant would close a loop.
+  const descendsFrom = (candidate: number, ancestorId: number) => {
+    const seen = new Set<number>();
+    let cursor: number | null = candidate;
+    while (cursor != null && !seen.has(cursor)) {
+      if (cursor === ancestorId) return true;
+      seen.add(cursor);
+      cursor = byId.get(cursor)?.parent ?? null;
+    }
+    return false;
+  };
+  const usable = (node: GraphNode, parentId: number | null): parentId is number =>
+    parentId != null && parentId !== node.id && byId.has(parentId) && !descendsFrom(parentId, node.id);
+
+  return nodes.map(node => {
+    if (node.id === trunk.id) return node.parent == null ? node : { ...node, parent: null };
+    if (usable(node, node.parent)) return node;
+    return { ...node, parent: usable(node, tipId) ? tipId : trunk.id };
+  });
+}
+
+// Break a label across lines instead of cutting it — a node whose title you
+// can't finish reading is a node you can't decide about.
+export function wrapLabel(text: string, maxChars = 20, maxLines = 3): string[] {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return [];
+  const lines: string[] = [];
+  let line = words[0];
+  for (let i = 1; i < words.length; i++) {
+    if ((line + " " + words[i]).length <= maxChars) { line += " " + words[i]; continue; }
+    lines.push(line);
+    if (lines.length === maxLines) { lines[maxLines - 1] += "…"; return lines; }
+    line = words[i];
+  }
+  lines.push(line);
+  return lines;
+}
+
+// Which topic was live when something surfaced. Feed items (asks, agenda
+// points, branches) hang off the node the conversation was standing on at the
+// time — that is what makes the map show HOW the thinking organised itself,
+// not just where the talk went. No extra model call: the timestamps already
+// know.
+export function hostNodeId(itemT: number, nodes: GraphNode[]): number | null {
+  if (!nodes.length) return null;
+  const ordered = [...nodes].sort((a, b) => a.t - b.t || a.id - b.id);
+  let host = ordered[0]; // anything older than the first topic belongs to it
+  for (const node of ordered) { if (node.t <= itemT) host = node; else break; }
+  return host.id;
+}
+
 // The walked route from the root to the tip — the "you are here" spine.
 export function pathToRoot(nodes: GraphNode[], fromId: number | null): number[] {
   const byId = new Map(nodes.map(n => [n.id, n]));

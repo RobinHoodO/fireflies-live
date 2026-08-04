@@ -218,7 +218,7 @@ export async function fetchGraph(
 ): Promise<GraphResult | null> {
   const sys = `You map a live conversation as a TREE of topics. Not a summary — a map of where the conversation went and where it could still go.
 Each node is one topic, labelled in 2-6 words.
-"parent" is the topic this one grew out of (null for an opening topic).
+"parent" is the topic this one grew out of. ONE tree only: exactly the very first topic of the meeting has "parent":null — everything after it grew out of something already on the map, so give it a real parent (the topic that was live when it came up, if nothing better fits). Never leave a second node parentless.
 "state":
 - "active": what is being discussed right now (exactly one node)
 - "explored": discussed, then moved on from

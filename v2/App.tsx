@@ -19,7 +19,7 @@ import {
 } from "./backend";
 import { packSession, unpackSession, shouldAutoResume } from "./session";
 import { prioritize, applyOrder, sortFeed, matchesFilter, FEED_SORTS, type FeedItem, type FeedSort } from "./feed";
-import { layoutMycelium, pathToRoot, wobbleOf, GRAPH_STATES, type GraphNode } from "./graph";
+import { layoutMycelium, pathToRoot, graftOrphans, wrapLabel, hostNodeId, wobbleOf, GRAPH_STATES, type GraphNode } from "./graph";
 
 // Persisted UI config — survives reloads / new sessions (localStorage).
 const SAVED: any = (() => { try { return JSON.parse(localStorage.getItem("fl-config") || "{}"); } catch { return {}; } })();
@@ -147,11 +147,12 @@ export default function App() {
   const [navBusy, setNavBusy] = useState(false);
   const [sentiments, setSentiments] = useState<SentimentPoint[]>([]);
   // EXPERIMENT: conversation map.
-  const [graph, setGraph] = useState<GraphNode[]>(() => Array.isArray(SESSION.graph) ? SESSION.graph
+  const [graph, setGraph] = useState<GraphNode[]>(() => graftOrphans(Array.isArray(SESSION.graph) ? SESSION.graph
     .filter((n: any) => n && typeof n.id === "number" && typeof n.label === "string" && typeof n.t === "number" && (n.parent === null || typeof n.parent === "number") && GRAPH_STATES.includes(n.state))
     .slice(0, 80)
     .map((n: any) => ({ id: n.id, label: n.label, parent: n.parent, state: n.state, t: n.t }))
-    : []);
+    // A restored map is one tree too — older sessions may hold loose roots.
+    : []));
   const [graphCurrent, setGraphCurrent] = useState<number | null>(() => typeof SESSION.graphCurrent === "number" ? SESSION.graphCurrent : null);
   const [pickedNode, setPickedNode] = useState<number | null>(null);
   const [mapView, setMapView] = useState({ tx: 0, ty: 0, k: 1 });
@@ -474,8 +475,11 @@ export default function App() {
         next.push({ id, label: n.label, parent: real(n.parent), state: n.state, t: Date.now() });
       }
       if (tip == null) tip = real(result.current);
-      // Exactly one tip: whatever the model named active wins.
-      setGraph(tip == null ? next : next.map(x => x.id === tip ? { ...x, state: "active" as const } : x.state === "active" ? { ...x, state: "explored" as const } : x));
+      // Exactly one tip: whatever the model named active wins. And exactly one
+      // tree: a topic that surfaced with no stated parent grew out of wherever
+      // the conversation was standing.
+      const tipped = tip == null ? next : next.map(x => x.id === tip ? { ...x, state: "active" as const } : x.state === "active" ? { ...x, state: "explored" as const } : x);
+      setGraph(graftOrphans(tipped, tip ?? graphCurrent));
       if (tip != null) setGraphCurrent(tip);
     } catch {}
   };
@@ -505,8 +509,8 @@ export default function App() {
     const placed = layoutMycelium(graph);
     mapTouchedRef.current = false;
     if (!placed.length) { setMapView({ tx: w / 2, ty: h / 2, k: 1 }); return; }
-    // Fit the whole colony, with room for the labels that hang off each node.
-    const LABEL = 190;
+    // Fit the whole colony, with room for the satellites and labels hanging off it.
+    const LABEL = 300;
     const minX = Math.min(...placed.map(p => p.x)) - LABEL, maxX = Math.max(...placed.map(p => p.x)) + LABEL;
     const minY = Math.min(...placed.map(p => p.y)) - 40, maxY = Math.max(...placed.map(p => p.y)) + 40;
     const k = Math.min(1.1, Math.max(0.28, Math.min(w / (maxX - minX), h / (maxY - minY))));
@@ -1150,6 +1154,25 @@ export default function App() {
     const placed = layoutMycelium(graph);
     const spine = new Set(pathToRoot(graph, graphCurrent));
     const at = new Map(placed.map(p => [p.id, p]));
+    // Feed items orbit the topic that was live when they surfaced — the same
+    // filter chips as the feed decide which ones are on the map.
+    const byHost = new Map<number, typeof visibleFeed>();
+    for (const item of visibleFeed) {
+      const host = hostNodeId(item.t, graph);
+      if (host == null) continue;
+      byHost.set(host, [...(byHost.get(host) ?? []), item]);
+    }
+    const satellites = [...byHost.entries()].flatMap(([hostId, items]) => {
+      const host = at.get(hostId);
+      if (!host) return [];
+      // Fan them around the host and stagger the reach in three tiers, so a
+      // busy topic's items don't stack their labels on each other.
+      return items.map((item, i) => {
+        const angle = host.angle + (i - (items.length - 1) / 2) * 0.66;
+        const r = 100 + (i % 3) * 40;
+        return { item, host, x: host.x + Math.cos(angle) * r, y: host.y + Math.sin(angle) * r, flip: Math.cos(angle) < -0.2 };
+      });
+    });
     const STATE: Record<string, { fill: string; stroke: string; text: string; hypha: string; dashed?: boolean }> = {
       active: { fill: "var(--ac)", stroke: "var(--ac)", text: "oklch(0.27 0.025 255)", hypha: "var(--ac)" },
       explored: { fill: "#fff", stroke: "oklch(0.7 0.1 242)", text: "oklch(0.34 0.02 255)", hypha: "oklch(0.82 0.05 242)" },
@@ -1164,7 +1187,7 @@ export default function App() {
           <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 40, height: 40, borderRadius: 11, background: "var(--ac-tint)", flex: "0 0 auto" }}><Icon id="i-command" size={19} stroke="var(--ac)" /></span>
           <div style={{ minWidth: 0, flex: "1 1 auto" }}>
             <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 17, fontWeight: 700, color: "oklch(0.27 0.025 255)", letterSpacing: "-0.01em" }}>Conversation map <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 7px", borderRadius: 999, background: "oklch(0.96 0.03 290)", color: "oklch(0.52 0.15 290)", verticalAlign: "2px" }}>EXPERIMENT</span></div>
-            <div style={{ fontSize: 13, color: "oklch(0.6 0.015 255)", marginTop: 2 }}>{graph.length} topics · {openCount} branch{openCount === 1 ? "" : "es"} not taken · drag to pan, scroll to zoom</div>
+            <div style={{ fontSize: 13, color: "oklch(0.6 0.015 255)", marginTop: 2 }}>{graph.length} topics · {satellites.length} item{satellites.length === 1 ? "" : "s"} on the map · {openCount} branch{openCount === 1 ? "" : "es"} not taken · drag to pan, scroll to zoom</div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 14, flex: "0 0 auto", fontSize: 12 }}>
             {[["active", "here now"], ["explored", "walked"], ["open", "not taken"], ["dropped", "dropped"]].map(([k, l]) => (
@@ -1175,6 +1198,18 @@ export default function App() {
             <button onClick={recenterMap} title="Recentre on the living tip" className="fl-hover-soft" style={{ ...iconBtn, width: 34, height: 34 }}><Icon id="i-search" size={16} /></button>
             <button onClick={() => { lastGraphRef.current = 0; runGraph(); }} title="Grow the map now" className="fl-hover-soft" style={{ ...iconBtn, width: 34, height: 34 }}><Icon id="i-refresh" size={16} /></button>
           </div>
+        </div>
+        {/* Same chips as the feed, same state — filtering in one place filters
+            both. The topic tree always stays: it IS the trajectory. */}
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 7, padding: "12px 28px", borderBottom: "1px solid oklch(0.95 0.005 250)", flex: "0 0 auto" }}>
+          <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "oklch(0.68 0.012 255)", marginRight: 3 }}>Show on map</span>
+          <button onClick={() => setFilters([])} style={{ ...typeChip(filters.length === 0, C.text, C.tint, false) }}>All<span style={countBadge(filters.length === 0)}>{feed.length}</span></button>
+          {FILTERS.map(f => { const active = filters.includes(f.id); return (
+            <button key={f.id} onClick={() => toggleFilter(f.id)} style={typeChip(active, f.color, f.bg, counts[f.id] === 0)}>
+              <Icon id={f.ic} size={13} stroke={active ? f.color : "oklch(0.6 0.015 255)"} />{f.l}<span style={countBadge(active)}>{counts[f.id]}</span>
+            </button>
+          ); })}
+          <button onClick={() => setHideDone(d => !d)} style={viewControl(hideDone)}><Icon id={hideDone ? "i-check" : "i-x"} size={13} />Hide done</button>
         </div>
         <div ref={mapViewportRef} style={{ flex: "1 1 auto", minHeight: 0, overflow: "hidden", position: "relative", background: "radial-gradient(900px 600px at 50% 40%, var(--ac-tint), transparent 70%)" }}>
           {placed.length === 0 ? (
@@ -1202,11 +1237,33 @@ export default function App() {
                     strokeDasharray={s.dashed ? "6 5" : undefined}
                     style={s.dashed ? undefined : { ["--len" as string]: 900, strokeDasharray: 900 }} />;
                 })}
+                {/* Feed items: a thin tether to the topic they came up under. */}
+                {satellites.map(({ item, host, x, y, flip }) => {
+                  const m = SUGMETA[item.type];
+                  const done = item.status === "done";
+                  const lines = wrapLabel(item.text, 22, 2);
+                  return (
+                    <g key={`s${item.id}`} className="fl-walkable" onClick={() => openFeedItem(item)} opacity={done ? 0.45 : 1}>
+                      <title>{`${m.kind}: ${item.text}`}</title>
+                      <path className="fl-hypha" d={`M${host.x},${host.y} L${x},${y}`} fill="none" stroke={m.color} strokeWidth={1} strokeDasharray="2 4" opacity={0.5} />
+                      <rect className="fl-node" x={x - 5} y={y - 5} width={10} height={10} rx={3} fill={m.bg} stroke={m.color} strokeWidth={1.8}
+                        transform={item.votes > 0 ? `rotate(45 ${x} ${y})` : undefined} />
+                      <text className="fl-node-label" x={flip ? x - 10 : x + 10} y={y + 3.5 - (lines.length - 1) * 6} textAnchor={flip ? "end" : "start"}
+                        fill={m.color} fontSize="10.5" fontWeight={600} fontFamily="inherit"
+                        stroke="#fff" strokeWidth={3} paintOrder="stroke" strokeLinejoin="round"
+                        style={done ? { textDecoration: "line-through" } : undefined}>
+                        {lines.map((line, i) => <tspan key={i} x={flip ? x - 10 : x + 10} dy={i === 0 ? 0 : 12}>{line}</tspan>)}
+                      </text>
+                    </g>
+                  );
+                })}
                 {placed.map(p => {
                   const s = STATE[p.state] ?? STATE.explored;
                   const walkable = p.state === "open" || p.state === "dropped";
                   const r = radiusOf(p);
                   const flip = Math.cos(p.angle) < -0.2; // label on the inside of the ring
+                  const lines = wrapLabel(p.label);
+                  const lx = flip ? p.x - r - 8 : p.x + r + 8;
                   return (
                     <g key={p.id} className={walkable ? "fl-walkable" : undefined} onClick={walkable ? () => pickUpBranch(p) : undefined}>
                       <title>{walkable ? `Walk back onto: ${p.label}` : p.label}</title>
@@ -1214,10 +1271,10 @@ export default function App() {
                       <circle className={p.state === "active" ? "fl-node fl-tip" : "fl-node"} cx={p.x} cy={p.y} r={r}
                         fill={s.fill} stroke={pickedNode === p.id ? "var(--ac)" : s.stroke} strokeWidth={pickedNode === p.id ? 3 : 2}
                         strokeDasharray={s.dashed ? "3 3" : undefined} />
-                      <text className="fl-node-label" x={flip ? p.x - r - 8 : p.x + r + 8} y={p.y + 4} textAnchor={flip ? "end" : "start"}
+                      <text className="fl-node-label" x={lx} y={p.y + 4.5 - (lines.length - 1) * 7} textAnchor={flip ? "end" : "start"}
                         fill={s.text} fontSize="12.5" fontWeight={p.state === "active" ? 700 : 600} fontFamily="inherit"
                         stroke="#fff" strokeWidth={3.5} paintOrder="stroke" strokeLinejoin="round">
-                        {p.label.length > 24 ? `${p.label.slice(0, 23)}…` : p.label}
+                        {lines.map((line, i) => <tspan key={i} x={lx} dy={i === 0 ? 0 : 14}>{line}</tspan>)}
                       </text>
                     </g>
                   );
