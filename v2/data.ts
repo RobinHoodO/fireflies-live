@@ -58,7 +58,8 @@ export const FLAGS = [
 ];
 
 export const VIEWS = [
-  { id: "transcript", l: "Transcript", ic: "i-file" }, { id: "split", l: "Split", ic: "i-columns" }, { id: "chat", l: "Chat", ic: "i-sparkles" },
+  { id: "transcript", l: "Transcript", ic: "i-file" }, { id: "split", l: "Split", ic: "i-columns" },
+  { id: "chat", l: "Chat", ic: "i-sparkles" }, { id: "map", l: "Map", ic: "i-command" },
 ];
 
 export const TABS = [

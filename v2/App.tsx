@@ -13,12 +13,13 @@ import {
   type Message,
 } from "./data";
 import {
-  fetchKeys, fetchMeetings, callAI, fetchFeed, streamLiveAnswer, streamPI, proposeModes,
+  fetchKeys, fetchMeetings, callAI, fetchFeed, fetchGraph, streamLiveAnswer, streamPI, proposeModes,
   connectLive, connectDemo, fileMeeting, fetchNavFrame, fetchSentiment, fetchContext, AGENDA_TYPES, FEED_TYPES, MODE_CONTEXT,
   type Meeting, type ConnStatus, type NavFrame, type SentimentPoint, type Constellation, type FeedType, type FeedResult,
 } from "./backend";
 import { packSession, unpackSession, shouldAutoResume } from "./session";
 import { prioritize, applyOrder, sortFeed, matchesFilter, FEED_SORTS, type FeedItem, type FeedSort } from "./feed";
+import { layoutTree, pathToRoot, GRAPH_STATES, type GraphNode } from "./graph";
 
 // Persisted UI config — survives reloads / new sessions (localStorage).
 const SAVED: any = (() => { try { return JSON.parse(localStorage.getItem("fl-config") || "{}"); } catch { return {}; } })();
@@ -36,7 +37,7 @@ const GREETING_PI: Message = { id: 0, role: "agent", text: "● **PI session rea
 
 type Line = { speaker: string; text: string; isFinal: boolean; id: string };
 
-const SETTINGS_FLAGS = [...FLAGS, { k: "agenda", l: "Dynamic agenda" }];
+const SETTINGS_FLAGS = [...FLAGS, { k: "agenda", l: "Dynamic agenda" }, { k: "graph", l: "Conversation map (experiment)" }];
 const FEED_CAP = 60;
 // Say-this steadiness: a fresh draft every few seconds reads as jumpy and
 // untrustworthy, so redraft slowly and only on the counterpart's turn.
@@ -75,7 +76,7 @@ function sentimentColor(score: number) {
 }
 
 export default function App() {
-  const [view, setView] = useState<"transcript" | "split" | "chat">(SAVED.view ?? "split");
+  const [view, setView] = useState<"transcript" | "split" | "chat" | "map">(SAVED.view ?? "split");
   const [status, setStatus] = useState<"idle" | "connecting" | "connected">("idle");
   const [splitRatio, setSplitRatio] = useState(0.6);
   const [questionMode, setQuestionMode] = useState<boolean>(SAVED.questionMode ?? false);
@@ -91,7 +92,7 @@ export default function App() {
   const [mode, setMode] = useState<string>(SAVED.mode ?? "");
   const [model, setModel] = useState<string>(() => MODEL_IDS.includes(SAVED.model) ? SAVED.model : "anthropic/claude-sonnet-5");
   const [fastModel, setFastModel] = useState<string>(() => FAST_MODELS.some(m => m.id === SAVED.fastModel) ? SAVED.fastModel : "anthropic/claude-haiku-4.5");
-  const [flags, setFlags] = useState<Record<string, boolean>>(() => ({ autosuggest: true, sentiment: true, actions: true, summary: false, speakers: true, profanity: false, agenda: true, ...(SAVED.flags ?? {}) }));
+  const [flags, setFlags] = useState<Record<string, boolean>>(() => ({ autosuggest: true, sentiment: true, actions: true, summary: false, speakers: true, profanity: false, agenda: true, graph: true, ...(SAVED.flags ?? {}) }));
   const [suggested, setSuggested] = useState<{ id: string; l: string; context: string }[]>([]);
   const [proposing, setProposing] = useState(false);
   const [customContext, setCustomContext] = useState<string>(SAVED.customContext ?? "");
@@ -145,6 +146,14 @@ export default function App() {
   });
   const [navBusy, setNavBusy] = useState(false);
   const [sentiments, setSentiments] = useState<SentimentPoint[]>([]);
+  // EXPERIMENT: conversation map.
+  const [graph, setGraph] = useState<GraphNode[]>(() => Array.isArray(SESSION.graph) ? SESSION.graph
+    .filter((n: any) => n && typeof n.id === "number" && typeof n.label === "string" && typeof n.t === "number" && (n.parent === null || typeof n.parent === "number") && GRAPH_STATES.includes(n.state))
+    .slice(0, 80)
+    .map((n: any) => ({ id: n.id, label: n.label, parent: n.parent, state: n.state, t: n.t }))
+    : []);
+  const [graphCurrent, setGraphCurrent] = useState<number | null>(() => typeof SESSION.graphCurrent === "number" ? SESSION.graphCurrent : null);
+  const [pickedNode, setPickedNode] = useState<number | null>(null);
 
   const splitRowRef = useRef<HTMLDivElement>(null);
   const chatComposerRef = useRef<HTMLTextAreaElement>(null);
@@ -158,6 +167,9 @@ export default function App() {
   const piAbortRef = useRef<AbortController | null>(null);
   const lastNavRef = useRef(0); const navSeqRef = useRef(0);
   const lastSentimentRef = useRef(0); const sentimentSeqRef = useRef(0);
+  const lastGraphRef = useRef(0); const graphSeqRef = useRef(0);
+  const graphRef = useRef<GraphNode[]>([]); graphRef.current = graph;
+  const graphIdRef = useRef(graph.length ? Math.max(...graph.map(n => n.id)) + 1 : 1);
   const constellationErrRef = useRef<number | undefined>(undefined);
   const liveAnswerRef = useRef(""); const sidRef = useRef(feed.length ? Math.max(...feed.map(s => s.id)) + 1 : 1);
   const scriptWordsRef = useRef<string[]>([]); const consumedTranscriptWordsRef = useRef(new Map<string, number>());
@@ -182,7 +194,7 @@ export default function App() {
       // Chat/PI logs are the only unbounded fields (PI output can be 200KB per
       // run) — cap what's persisted so a long meeting can't blow the
       // localStorage quota and silently stop persistence.
-      const core = { lines, feed, navFrame, selectedMeeting, constellation, status };
+      const core = { lines, feed, graph, graphCurrent, navFrame, selectedMeeting, constellation, status };
       const trim = (ms: Message[], n: number) => ms.slice(-n).map(m => m.text.length > 20_000 ? { ...m, text: `${m.text.slice(0, 20_000)}\n…[truncated]` } : m);
       try { localStorage.setItem("fl-session", packSession({ ...core, messages: trim(messages, 200), piMessages: trim(piMessages, 60) }, Date.now())); }
       catch { try { localStorage.setItem("fl-session", packSession(core, Date.now())); } catch { /* storage unavailable */ } }
@@ -190,7 +202,7 @@ export default function App() {
     const id = setTimeout(write, 1000);
     window.addEventListener("pagehide", write);
     return () => { clearTimeout(id); window.removeEventListener("pagehide", write); };
-  }, [lines, feed, messages, piMessages, navFrame, selectedMeeting, constellation, status]);
+  }, [lines, feed, graph, graphCurrent, messages, piMessages, navFrame, selectedMeeting, constellation, status]);
 
   // Auto-resume: if the page reloaded seconds ago mid-call, reconnect to the same
   // meeting WITHOUT clearing restored state (startConnection would wipe it).
@@ -208,8 +220,13 @@ export default function App() {
   const modeCtx = MODE_CONTEXT[mode] ?? suggested.find(s => s.id === mode)?.context ?? "";
   const goalBlock = goal.trim() ? `\nROBIN'S GOAL FOR THIS CONVERSATION: ${goal.trim()}\nNavigate toward this goal. Respect any red lines it states. Prefer moves that advance it.` : "";
   const situationBlock = navFrame ? `\nSITUATION: phase=${navFrame.phase}; counterpart=${navFrame.stance}; next_move=${navFrame.next_move}` : "";
+  // What Robin has explicitly prioritised (votes / his own items / a branch he
+  // picked up off the map) steers the Say-this draft too — otherwise pinning
+  // something changes the feed's mind but not the words being handed to him.
+  const pinned = feed.filter(item => item.status !== "done" && item.votes > 0).slice(0, 3);
+  const pinnedBlock = pinned.length ? `\nROBIN HAS PRIORITISED (steer toward these): ${pinned.map(item => item.text).join(" · ")}` : "";
   const baseContext = [modeCtx, customContext.trim()].filter(Boolean).join(" ");
-  const pulseContext = baseContext + goalBlock + situationBlock + (constellation ? `\nBACKGROUND (Robin's resources):\n${constellation.bundle.slice(0, 1500)}` : "");
+  const pulseContext = baseContext + goalBlock + situationBlock + pinnedBlock + (constellation ? `\nBACKGROUND (Robin's resources):\n${constellation.bundle.slice(0, 1500)}` : "");
   const chatContext = baseContext + goalBlock + situationBlock + (constellation ? `\nBACKGROUND (from Robin's own resources — ground your guidance in this):\n${constellation.bundle.slice(0, 6000)}` : "");
 
   const setStatusMapped = (s: ConnStatus) => {
@@ -410,6 +427,72 @@ export default function App() {
   };
   useEffect(() => { runSentiment(); }, [lines, flags.sentiment, orKey, fastModel, status]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── EXPERIMENT: conversation map ────────────────────────────────
+  // Slowest loop in the app (90s): a tree of topics moves at the pace of the
+  // conversation's shape, not its words, so polling it fast is wasted money.
+  const runGraph = async () => {
+    if (!flags.graph || !orKey || lines.length < 3 || status !== "connected") { graphSeqRef.current++; return; }
+    const now = Date.now();
+    if (now - lastGraphRef.current < 60000) return;
+    lastGraphRef.current = now;
+    const ctx = lines.slice(-50).map(l => `[${l.speaker}]: ${l.text}`).join("\n");
+    const existing = graphRef.current.map(n => ({ id: n.id, label: n.label, parent: n.parent, state: n.state }));
+    const seq = ++graphSeqRef.current;
+    try {
+      const result = await fetchGraph(ctx, orKey, goal.trim(), fastModel, existing);
+      if (seq !== graphSeqRef.current || !result) return;
+      // Merged outside the state updater: it mints ids from a ref, and React
+      // dev-mode calls updaters twice to check purity (which would burn ids).
+      const next = [...graphRef.current];
+      // Negative ids are the model's temporary handles, so it can add a topic
+      // AND its branch in one pass. Resolve them to real ids as we go.
+      const temp = new Map<number, number>();
+      const real = (id: number | null) => id == null ? null : id < 0 ? temp.get(id) ?? null : id;
+      let tip: number | null = null;
+      for (const n of result.nodes) {
+        const existing = n.id != null && n.id >= 0 ? next.findIndex(x => x.id === n.id) : -1;
+        if (existing >= 0) {
+          const parent = real(n.parent);
+          next[existing] = {
+            ...next[existing], state: n.state, ...(n.label ? { label: n.label } : {}),
+            // The tree may only GAIN structure: a late parent links a node up,
+            // but a null never detaches one that already has a place.
+            ...(parent != null && parent !== n.id ? { parent } : {}),
+            t: Date.now(),
+          };
+          if (n.state === "active") tip = n.id;
+          continue;
+        }
+        if (!n.label) continue;
+        const dupe = next.find(x => x.label.toLowerCase() === n.label.toLowerCase());
+        if (dupe) { if (n.id != null && n.id < 0) temp.set(n.id, dupe.id); continue; }
+        const id = graphIdRef.current++;
+        if (n.id != null && n.id < 0) temp.set(n.id, id);
+        if (n.state === "active") tip = id;
+        next.push({ id, label: n.label, parent: real(n.parent), state: n.state, t: Date.now() });
+      }
+      if (tip == null) tip = real(result.current);
+      // Exactly one tip: whatever the model named active wins.
+      setGraph(tip == null ? next : next.map(x => x.id === tip ? { ...x, state: "active" as const } : x.state === "active" ? { ...x, state: "explored" as const } : x));
+      if (tip != null) setGraphCurrent(tip);
+    } catch {}
+  };
+  useEffect(() => { runGraph(); }, [lines, flags.graph, orKey, fastModel, goal, status]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Walking back onto an unwalked branch: mark it active (the tree re-roots on
+  // it) and push it to the top of the live feed as Robin's own item, so the
+  // feed loop and the Say-this draft both steer there.
+  const pickUpBranch = (node: GraphNode) => {
+    graphSeqRef.current++;
+    lastGraphRef.current = 0;
+    setGraph(prev => prev.map(n => n.id === node.id ? { ...n, state: "active" as const, t: Date.now() } : n.state === "active" ? { ...n, state: "explored" as const } : n));
+    setGraphCurrent(node.id);
+    setPickedNode(node.id);
+    setFeed(prev => prev.some(item => item.text.toLowerCase() === node.label.toLowerCase())
+      ? prioritize(prev.map(item => item.text.toLowerCase() === node.label.toLowerCase() ? { ...item, votes: item.votes + 1, t: Date.now() } : item))
+      : prioritize([...prev, { id: sidRef.current++, type: "branch" as const, text: node.label, votes: 2, source: "you" as const, t: Date.now() }]));
+  };
+
   const refreshNav = () => { lastNavRef.current = 0; runNav(); };
   // Manual override for the slow Say-this cadence — redraft now.
   const redraftAnswer = () => { lastAnswerRef.current = 0; liveAnswerRef.current = ""; setRedraftTick(n => n + 1); };
@@ -434,6 +517,7 @@ export default function App() {
   // meeting" and the Reset button.
   const clearMeetingState = () => {
     setLines([]); setFeed([]); setSentiments([]); setFeedInput(""); setLiveAnswer(""); setPendingCmd(null); setNavFrame(null);
+    setGraph([]); setGraphCurrent(null); setPickedNode(null); graphSeqRef.current++; lastGraphRef.current = 0; graphIdRef.current = 1;
     navSeqRef.current++; feedSeqRef.current++; sentimentSeqRef.current++;
     setNavBusy(false); lastNavRef.current = 0; lastSentimentRef.current = 0; lastFeedRef.current = 0; lastAnswerRef.current = 0; sidRef.current = 1;
     liveAnswerRef.current = ""; scriptWordsRef.current = []; consumedTranscriptWordsRef.current.clear(); scriptPointerRef.current = 0; missStreakRef.current = 0;
@@ -475,6 +559,7 @@ export default function App() {
       if (e.key === "1") { e.preventDefault(); setView("transcript"); }
       else if (e.key === "2") { e.preventDefault(); setView("split"); }
       else if (e.key === "3") { e.preventDefault(); setView("chat"); }
+      else if (e.key === "4") { e.preventDefault(); setView("map"); }
       else if (e.key.toLowerCase() === "k") { e.preventDefault(); if (!meetingsOpen && ffKey) loadMeetings(); setMeetingsOpen(o => !o); }
       else if (e.key.toLowerCase() === "u") { e.preventDefault(); setQuestionMode(q => !q); }
       else if (e.key.toLowerCase() === "j") { e.preventDefault(); if (view === "transcript") setView("split"); setTab("chat"); setTimeout(() => chatComposerRef.current?.focus(), 0); }
@@ -603,6 +688,7 @@ export default function App() {
       `Status: ${statusLabel}`,
       `\n## Transcript\n${transcript}`,
       agendaMd ? `\n## Agenda (priority order)\n${agendaMd}` : "",
+      graph.length ? `\n## Conversation map\n${layoutTree(graph).sort((a, b) => a.depth - b.depth || a.row - b.row).map(n => `${"  ".repeat(n.depth)}- ${n.label} — ${n.state}`).join("\n")}\n\nBranches not taken: ${graph.filter(n => n.state === "open").map(n => n.label).join(" · ") || "none"}` : "",
       `\n## Live Feed\n${liveFeed}`,
       liveAnswer ? `\n## Question Mode Draft\n${liveAnswer}` : "",
       navFrame ? `\n## Navigator\nPhase: ${navFrame.phase} · Stance: ${navFrame.stance} · Progress: ${navFrame.goal_progress} · Next move: ${navFrame.next_move} · Risk: ${navFrame.risk}` : "",
@@ -642,7 +728,7 @@ export default function App() {
   };
 
   // derived
-  const isSplit = view === "split", isChat = view === "chat";
+  const isSplit = view === "split", isChat = view === "chat", isMap = view === "map";
   const isConnected = status === "connected", isConnecting = status === "connecting", isIdle = status === "idle";
   const hasTranscript = grouped.length > 0;
   const statusColor = isConnected ? "oklch(0.68 0.16 155)" : isConnecting ? "oklch(0.78 0.14 75)" : "oklch(0.7 0.01 250)";
@@ -1006,6 +1092,81 @@ export default function App() {
     </div>
   );
 
+  // ── EXPERIMENT: conversation map view ─────────────────────────────
+  const mapCard = (() => {
+    const placed = layoutTree(graph);
+    const spine = new Set(pathToRoot(graph, graphCurrent));
+    const COL = 240, ROW = 62, PAD = 40, NODE_W = 190, NODE_H = 40;
+    const depth = Math.max(0, ...placed.map(p => p.depth));
+    const rows = Math.max(0, ...placed.map(p => p.row));
+    const width = PAD * 2 + depth * COL + NODE_W;
+    const height = PAD * 2 + rows * ROW + NODE_H;
+    const at = (p: typeof placed[number]) => ({ x: PAD + p.depth * COL, y: PAD + p.row * ROW });
+    const STATE: Record<string, { fill: string; stroke: string; text: string; dash?: string }> = {
+      active: { fill: "var(--ac)", stroke: "var(--ac)", text: "#fff" },
+      explored: { fill: "#fff", stroke: "oklch(0.84 0.08 242)", text: "oklch(0.3 0.02 255)" },
+      open: { fill: "oklch(0.97 0.04 75)", stroke: "oklch(0.78 0.12 75)", text: "oklch(0.45 0.12 70)", dash: "5 4" },
+      dropped: { fill: "oklch(0.975 0.004 250)", stroke: "oklch(0.9 0.006 255)", text: "oklch(0.68 0.012 255)", dash: "2 4" },
+    };
+    const openCount = graph.filter(n => n.state === "open").length;
+    return (
+      <div style={{ ...cardBase, flex: "1 1 auto", minWidth: 0 }}>
+        <div style={{ padding: "24px 28px", display: "flex", alignItems: "center", gap: 14, flex: "0 0 auto", borderBottom: "1px solid oklch(0.95 0.005 250)" }}>
+          <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 40, height: 40, borderRadius: 11, background: "var(--ac-tint)", flex: "0 0 auto" }}><Icon id="i-command" size={19} stroke="var(--ac)" /></span>
+          <div style={{ minWidth: 0, flex: "1 1 auto" }}>
+            <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 17, fontWeight: 700, color: "oklch(0.27 0.025 255)", letterSpacing: "-0.01em" }}>Conversation map <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 7px", borderRadius: 999, background: "oklch(0.96 0.03 290)", color: "oklch(0.52 0.15 290)", verticalAlign: "2px" }}>EXPERIMENT</span></div>
+            <div style={{ fontSize: 13, color: "oklch(0.6 0.015 255)", marginTop: 2 }}>{graph.length} topics · {openCount} branch{openCount === 1 ? "" : "es"} not taken</div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 14, flex: "0 0 auto", fontSize: 12 }}>
+            {[["active", "here now"], ["explored", "walked"], ["open", "not taken"], ["dropped", "dropped"]].map(([k, l]) => (
+              <span key={k} style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "oklch(0.5 0.02 255)" }}>
+                <span style={{ width: 11, height: 11, borderRadius: 3, background: STATE[k].fill, border: `1.5px ${STATE[k].dash ? "dashed" : "solid"} ${STATE[k].stroke}` }} />{l}
+              </span>
+            ))}
+            <button onClick={() => { lastGraphRef.current = 0; runGraph(); }} title="Redraw the map now" className="fl-hover-soft" style={{ ...iconBtn, width: 34, height: 34 }}><Icon id="i-refresh" size={16} /></button>
+          </div>
+        </div>
+        <div className="fl-scroll" style={{ flex: "1 1 auto", minHeight: 0, overflow: "auto" }}>
+          {placed.length === 0 ? (
+            <div style={{ height: "100%", minHeight: 420, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", padding: 48, gap: 12 }}>
+              <Icon id="i-command" size={34} stroke="oklch(0.8 0.01 255)" />
+              <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 19, fontWeight: 700, color: "oklch(0.4 0.02 255)" }}>The tree grows once you connect</div>
+              <div style={{ fontSize: 14, lineHeight: 1.6, color: "oklch(0.58 0.015 255)", maxWidth: 460 }}>Every topic becomes a node. Directions that come up but nobody follows stay on the map as dashed branches — click one to walk back onto it.</div>
+            </div>
+          ) : (
+            <svg width={width} height={height} style={{ display: "block", minWidth: "100%" }}>
+              {placed.map(p => {
+                const parent = placed.find(x => x.id === p.parent);
+                if (!parent) return null;
+                const a = at(parent), b = at(p);
+                const x1 = a.x + NODE_W, y1 = a.y + NODE_H / 2, x2 = b.x, y2 = b.y + NODE_H / 2;
+                const onSpine = spine.has(p.id) && spine.has(parent.id);
+                return <path key={`e${p.id}`} d={`M${x1},${y1} C${x1 + COL / 3},${y1} ${x2 - COL / 3},${y2} ${x2},${y2}`} fill="none"
+                  stroke={onSpine ? "var(--ac)" : p.state === "open" ? "oklch(0.82 0.1 75)" : "oklch(0.88 0.008 255)"}
+                  strokeWidth={onSpine ? 2.4 : 1.5} strokeDasharray={p.state === "open" || p.state === "dropped" ? "5 4" : undefined} />;
+              })}
+              {placed.map(p => {
+                const s = STATE[p.state] ?? STATE.explored;
+                const { x, y } = at(p);
+                const walkable = p.state === "open" || p.state === "dropped";
+                return (
+                  <g key={p.id} onClick={walkable ? () => pickUpBranch(p) : undefined} style={{ cursor: walkable ? "pointer" : "default" }}>
+                    <title>{walkable ? `Walk back onto: ${p.label}` : p.label}</title>
+                    <rect x={x} y={y} width={NODE_W} height={NODE_H} rx={11} fill={s.fill} stroke={pickedNode === p.id ? "var(--ac)" : s.stroke} strokeWidth={pickedNode === p.id ? 2.5 : 1.5} strokeDasharray={s.dash} />
+                    <text x={x + 13} y={y + NODE_H / 2 + 4.5} fill={s.text} fontSize="12.5" fontWeight={p.state === "active" ? 700 : 600} fontFamily="inherit">
+                      {p.label.length > 26 ? `${p.label.slice(0, 25)}…` : p.label}
+                    </text>
+                  </g>
+                );
+              })}
+            </svg>
+          )}
+        </div>
+        {openCount > 0 && <div style={{ padding: "12px 28px", borderTop: "1px solid oklch(0.95 0.005 250)", fontSize: 12.5, color: "oklch(0.55 0.015 255)" }}>Click a dashed branch to walk back onto it — it becomes the live topic and jumps to the top of your feed.</div>}
+      </div>
+    );
+  })();
+
   // ── Config slide-over ─────────────────────────────────────────────
   // Confirm gate for transcript-derived commands. Cancel is the default/safe
   // action (autoFocus), so Enter never auto-runs the command.
@@ -1119,7 +1280,7 @@ export default function App() {
         <div ref={splitRowRef} style={{ flex: "1 1 auto", minHeight: 0, display: "flex", gap: 18 }}>
           {/* Chat view = the assistant panel full-width: feed, chat AND PI —
               hiding the transcript, not the other two tabs. */}
-          {isChat ? sidebarCard : (
+          {isMap ? mapCard : isChat ? sidebarCard : (
             <>
               <div style={isSplit ? { flex: `0 0 ${pct}`, minWidth: 0, display: "flex" } : { flex: "1 1 auto", minWidth: 0, display: "flex" }}>{transcriptCard}</div>
               {isSplit && (

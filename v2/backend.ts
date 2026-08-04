@@ -1,3 +1,5 @@
+import { GRAPH_STATES, type GraphNodeState } from "./graph.ts";
+
 // Real backend wiring for the v2 interface (Phase 2).
 // Ported from the original src/App.tsx: key injection, Fireflies meetings + live
 // socket (with demo fallback), OpenRouter calls, suggestions, live answers, mode
@@ -201,6 +203,50 @@ Respond ONLY with {"items":[...]} (plus "order" when it changed). No prose, no m
         ...(x.status === "done" ? { status: "done" as const, outcome: String(x.outcome ?? "") } : {}),
       }));
     return { items, order };
+  } catch { return null; }
+}
+
+// ── EXPERIMENT: conversation map ─────────────────────────────────
+// One slow call maintains the meeting as a TREE of topics — the route walked
+// plus the branches that opened and were never taken.
+export interface GraphUpdate { id: number | null; label: string; parent: number | null; state: GraphNodeState }
+export interface GraphResult { nodes: GraphUpdate[]; current: number | null }
+
+export async function fetchGraph(
+  ctx: string, key: string, goal: string, model: string,
+  existing: { id: number; label: string; parent: number | null; state: GraphNodeState }[],
+): Promise<GraphResult | null> {
+  const sys = `You map a live conversation as a TREE of topics. Not a summary — a map of where the conversation went and where it could still go.
+Each node is one topic, labelled in 2-6 words.
+"parent" is the topic this one grew out of (null for an opening topic).
+"state":
+- "active": what is being discussed right now (exactly one node)
+- "explored": discussed, then moved on from
+- "open": a direction that surfaced but was NOT taken — a path still available
+- "dropped": was open, now clearly irrelevant
+${goal ? `ROBIN'S GOAL: ${goal}\nBranches that serve this goal matter most.\n` : ""}Current map as JSON: ${JSON.stringify(existing)}
+Read the latest transcript, then return ONLY changes:
+- A node whose state changed: its SAME "id" with the new "state". Give it a "parent" too if you now see which topic it grew out of — that is how a flat list becomes a tree. Only ever set a real parent; never send null to detach a node.
+- NEW nodes: give each a NEGATIVE temporary id (-1, -2, -3). You may use a temporary id as another new node's "parent", as long as the parent is listed FIRST. So you can add a topic and its branch in the same pass. Up to 4 new nodes per pass.
+- Mark a branch "open" the moment someone gestures at a direction the group does not follow — a question parked, an aside, a "we should also…", a topic raised and dropped. Those unwalked branches are the whole point of this map, so surface them generously.
+- Never delete a node. A topic that died becomes "dropped", not missing.
+- Omit unchanged nodes.
+- "current": the id of the "active" node ("current" may be a temporary id).
+Respond ONLY with {"nodes":[{"id":<id|-1|null>,"label":"...","parent":<id|-1|null>,"state":"..."}],"current":<id|null>}. No prose.`;
+  try {
+    const raw = await callAI([{ role: "system", content: sys }, { role: "user", content: `Transcript (latest last):\n${ctx}` }], key, model, 700);
+    const value = modelJsonObject(raw);
+    if (!value || !Array.isArray(value.nodes)) return null;
+    const nodes = value.nodes
+      .filter((n: any) => n && typeof n === "object" && (n.id === null || Number.isInteger(n.id)) && (n.parent === null || n.parent === undefined || Number.isInteger(n.parent)) && GRAPH_STATES.includes(n.state))
+      .slice(0, 8)
+      .map((n: any) => ({
+        id: Number.isInteger(n.id) ? n.id : null,
+        label: typeof n.label === "string" ? n.label.trim().slice(0, 60) : "",
+        parent: Number.isInteger(n.parent) ? n.parent : null,
+        state: n.state as GraphNodeState,
+      }));
+    return { nodes, current: Number.isInteger(value.current) ? value.current : null };
   } catch { return null; }
 }
 
