@@ -9,16 +9,17 @@ import { mdToHtml } from "./md";
 import {
   C, MODES, MODELS, MODEL_IDS, FAST_MODELS, FLAGS, VIEWS, TABS, FILTERS, ADDABLE, SUGMETA,
   RATES, EMPTY_STEPS,
-  segBtn, tabBtn, modeChip, filterChip, countBadge, modelRow, track, knob, qBtnStyle, rel,
+  segBtn, tabBtn, modeChip, filterChip, typeChip, viewControl, countBadge, modelRow, track, knob, qBtnStyle, rel,
   type Message,
 } from "./data";
 import {
-  fetchKeys, fetchMeetings, callAI, fetchFeed, streamLiveAnswer, streamPI, proposeModes,
+  fetchKeys, fetchMeetings, callAI, fetchFeed, fetchGraph, streamLiveAnswer, streamPI, proposeModes,
   connectLive, connectDemo, fileMeeting, fetchNavFrame, fetchSentiment, fetchContext, AGENDA_TYPES, FEED_TYPES, MODE_CONTEXT,
   type Meeting, type ConnStatus, type NavFrame, type SentimentPoint, type Constellation, type FeedType, type FeedResult,
 } from "./backend";
 import { packSession, unpackSession, shouldAutoResume } from "./session";
-import { prioritize, applyOrder, sortFeed, matchesFilter, FEED_SORTS, type FeedItem, type FeedSort } from "./feed";
+import { prioritize, applyOrder, sortFeed, matchesFilter, anchorFor, isOpenPossibility, POSSIBILITY_TYPES, FEED_SORTS, type FeedItem, type FeedSort } from "./feed";
+import { layoutMycelium, pathToRoot, graftOrphans, wrapLabel, hostNodeId, wobbleOf, GRAPH_STATES, type GraphNode } from "./graph";
 
 // Persisted UI config — survives reloads / new sessions (localStorage).
 const SAVED: any = (() => { try { return JSON.parse(localStorage.getItem("fl-config") || "{}"); } catch { return {}; } })();
@@ -32,11 +33,11 @@ const cardBase: CSSProperties = { display: "flex", flexDirection: "column", back
 const iconBtn: CSSProperties = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: 40, height: 40, border: `1px solid ${BORDER}`, borderRadius: 11, background: "#fff", color: "oklch(0.45 0.02 255)", cursor: "pointer" };
 
 const GREETING_CHAT: Message = { id: 0, role: "agent", text: "Hi — I'm following this call live. Ask me anything about it, or tap an Ask / Do / Note suggestion." };
-const GREETING_PI: Message = { id: 0, role: "agent", text: "● **PI session ready** — read · bash · edit · write tools loaded. Message me, or tap a Command suggestion and it runs right here." };
+const GREETING_PI: Message = { id: 0, role: "agent", text: "● **Command interface ready** — every message starts a fresh Claude in the Thrivbe AI workspace. Tap a Command in the feed to load it here with the meeting context, edit it, then send." };
 
 type Line = { speaker: string; text: string; isFinal: boolean; id: string };
 
-const SETTINGS_FLAGS = [...FLAGS, { k: "agenda", l: "Dynamic agenda" }];
+const SETTINGS_FLAGS = [...FLAGS, { k: "agenda", l: "Dynamic agenda" }, { k: "graph", l: "Conversation map (experiment)" }];
 const FEED_CAP = 60;
 // Say-this steadiness: a fresh draft every few seconds reads as jumpy and
 // untrustworthy, so redraft slowly and only on the counterpart's turn.
@@ -75,7 +76,7 @@ function sentimentColor(score: number) {
 }
 
 export default function App() {
-  const [view, setView] = useState<"transcript" | "split" | "chat">(SAVED.view ?? "split");
+  const [view, setView] = useState<"transcript" | "split" | "chat" | "map">(SAVED.view ?? "split");
   const [status, setStatus] = useState<"idle" | "connecting" | "connected">("idle");
   const [splitRatio, setSplitRatio] = useState(0.6);
   const [questionMode, setQuestionMode] = useState<boolean>(SAVED.questionMode ?? false);
@@ -91,7 +92,7 @@ export default function App() {
   const [mode, setMode] = useState<string>(SAVED.mode ?? "");
   const [model, setModel] = useState<string>(() => MODEL_IDS.includes(SAVED.model) ? SAVED.model : "anthropic/claude-sonnet-5");
   const [fastModel, setFastModel] = useState<string>(() => FAST_MODELS.some(m => m.id === SAVED.fastModel) ? SAVED.fastModel : "anthropic/claude-haiku-4.5");
-  const [flags, setFlags] = useState<Record<string, boolean>>(() => ({ autosuggest: true, sentiment: true, actions: true, summary: false, speakers: true, profanity: false, agenda: true, ...(SAVED.flags ?? {}) }));
+  const [flags, setFlags] = useState<Record<string, boolean>>(() => ({ autosuggest: true, sentiment: true, actions: true, summary: false, speakers: true, profanity: false, agenda: true, graph: true, ...(SAVED.flags ?? {}) }));
   const [suggested, setSuggested] = useState<{ id: string; l: string; context: string }[]>([]);
   const [proposing, setProposing] = useState(false);
   const [customContext, setCustomContext] = useState<string>(SAVED.customContext ?? "");
@@ -118,7 +119,7 @@ export default function App() {
     const items = Array.isArray(SESSION.feed) ? SESSION.feed
       .filter((x: any) => x && typeof x.id === "number" && typeof x.text === "string" && FEED_TYPES.includes(x.type) && typeof x.t === "number" && typeof x.votes === "number" && (x.source === "ai" || x.source === "you") && (x.status === undefined || x.status === "done"))
       .slice(0, FEED_CAP)
-      .map((x: any) => ({ id: x.id, type: x.type as FeedType, text: x.text, t: x.t, votes: x.votes, source: x.source as "ai" | "you", ...(x.status === "done" ? { status: "done" as const } : {}), ...(x.outcome !== undefined ? { outcome: String(x.outcome) } : {}) }))
+      .map((x: any) => ({ id: x.id, type: x.type as FeedType, text: x.text, t: x.t, votes: x.votes, source: x.source as "ai" | "you", ...(typeof x.live === "boolean" ? { live: x.live } : {}), ...(x.status === "done" ? { status: "done" as const } : {}), ...(x.outcome !== undefined ? { outcome: String(x.outcome) } : {}) }))
       : [];
     return prioritize(items);
   });
@@ -138,16 +139,26 @@ export default function App() {
   const [missStreak, setMissStreak] = useState(0);
   const [copied, setCopied] = useState(false);
   const [filed, setFiled] = useState<"idle" | "filing" | "done" | "error">("idle");
-  const [pendingCmd, setPendingCmd] = useState<string | null>(null);
   const [navFrame, setNavFrame] = useState<NavFrame | null>(() => {
     const n = SESSION.navFrame;
     return n && typeof n === "object" && ["phase", "stance", "goal_progress", "next_move", "risk"].every(k => typeof n[k] === "string") ? n : null;
   });
   const [navBusy, setNavBusy] = useState(false);
   const [sentiments, setSentiments] = useState<SentimentPoint[]>([]);
+  // EXPERIMENT: conversation map.
+  const [graph, setGraph] = useState<GraphNode[]>(() => graftOrphans(Array.isArray(SESSION.graph) ? SESSION.graph
+    .filter((n: any) => n && typeof n.id === "number" && typeof n.label === "string" && typeof n.t === "number" && (n.parent === null || typeof n.parent === "number") && GRAPH_STATES.includes(n.state))
+    .slice(0, 80)
+    .map((n: any) => ({ id: n.id, label: n.label, parent: n.parent, state: n.state, t: n.t }))
+    // A restored map is one tree too — older sessions may hold loose roots.
+    : []));
+  const [graphCurrent, setGraphCurrent] = useState<number | null>(() => typeof SESSION.graphCurrent === "number" ? SESSION.graphCurrent : null);
+  const [pickedNode, setPickedNode] = useState<number | null>(null);
+  const [mapView, setMapView] = useState({ tx: 0, ty: 0, k: 1 });
 
   const splitRowRef = useRef<HTMLDivElement>(null);
   const chatComposerRef = useRef<HTMLTextAreaElement>(null);
+  const piComposerRef = useRef<HTMLTextAreaElement>(null);
   const connRef = useRef<{ connect: () => Promise<void>; disconnect: () => void } | null>(null);
   // Counters re-seed past restored ids — a post-resume line/suggestion must
   // never mint a duplicate id (duplicate React keys silently drop rows).
@@ -158,6 +169,10 @@ export default function App() {
   const piAbortRef = useRef<AbortController | null>(null);
   const lastNavRef = useRef(0); const navSeqRef = useRef(0);
   const lastSentimentRef = useRef(0); const sentimentSeqRef = useRef(0);
+  const lastGraphRef = useRef(0); const graphSeqRef = useRef(0);
+  const graphRef = useRef<GraphNode[]>([]); graphRef.current = graph;
+  const graphIdRef = useRef(graph.length ? Math.max(...graph.map(n => n.id)) + 1 : 1);
+  const mapViewportRef = useRef<HTMLDivElement>(null); const mapTouchedRef = useRef(false);
   const constellationErrRef = useRef<number | undefined>(undefined);
   const liveAnswerRef = useRef(""); const sidRef = useRef(feed.length ? Math.max(...feed.map(s => s.id)) + 1 : 1);
   const scriptWordsRef = useRef<string[]>([]); const consumedTranscriptWordsRef = useRef(new Map<string, number>());
@@ -182,7 +197,7 @@ export default function App() {
       // Chat/PI logs are the only unbounded fields (PI output can be 200KB per
       // run) — cap what's persisted so a long meeting can't blow the
       // localStorage quota and silently stop persistence.
-      const core = { lines, feed, navFrame, selectedMeeting, constellation, status };
+      const core = { lines, feed, graph, graphCurrent, navFrame, selectedMeeting, constellation, status };
       const trim = (ms: Message[], n: number) => ms.slice(-n).map(m => m.text.length > 20_000 ? { ...m, text: `${m.text.slice(0, 20_000)}\n…[truncated]` } : m);
       try { localStorage.setItem("fl-session", packSession({ ...core, messages: trim(messages, 200), piMessages: trim(piMessages, 60) }, Date.now())); }
       catch { try { localStorage.setItem("fl-session", packSession(core, Date.now())); } catch { /* storage unavailable */ } }
@@ -190,7 +205,7 @@ export default function App() {
     const id = setTimeout(write, 1000);
     window.addEventListener("pagehide", write);
     return () => { clearTimeout(id); window.removeEventListener("pagehide", write); };
-  }, [lines, feed, messages, piMessages, navFrame, selectedMeeting, constellation, status]);
+  }, [lines, feed, graph, graphCurrent, messages, piMessages, navFrame, selectedMeeting, constellation, status]);
 
   // Auto-resume: if the page reloaded seconds ago mid-call, reconnect to the same
   // meeting WITHOUT clearing restored state (startConnection would wipe it).
@@ -208,8 +223,13 @@ export default function App() {
   const modeCtx = MODE_CONTEXT[mode] ?? suggested.find(s => s.id === mode)?.context ?? "";
   const goalBlock = goal.trim() ? `\nROBIN'S GOAL FOR THIS CONVERSATION: ${goal.trim()}\nNavigate toward this goal. Respect any red lines it states. Prefer moves that advance it.` : "";
   const situationBlock = navFrame ? `\nSITUATION: phase=${navFrame.phase}; counterpart=${navFrame.stance}; next_move=${navFrame.next_move}` : "";
+  // What Robin has explicitly prioritised (votes / his own items / a branch he
+  // picked up off the map) steers the Say-this draft too — otherwise pinning
+  // something changes the feed's mind but not the words being handed to him.
+  const pinned = feed.filter(item => item.status !== "done" && item.votes > 0).slice(0, 3);
+  const pinnedBlock = pinned.length ? `\nROBIN HAS PRIORITISED (steer toward these): ${pinned.map(item => item.text).join(" · ")}` : "";
   const baseContext = [modeCtx, customContext.trim()].filter(Boolean).join(" ");
-  const pulseContext = baseContext + goalBlock + situationBlock + (constellation ? `\nBACKGROUND (Robin's resources):\n${constellation.bundle.slice(0, 1500)}` : "");
+  const pulseContext = baseContext + goalBlock + situationBlock + pinnedBlock + (constellation ? `\nBACKGROUND (Robin's resources):\n${constellation.bundle.slice(0, 1500)}` : "");
   const chatContext = baseContext + goalBlock + situationBlock + (constellation ? `\nBACKGROUND (from Robin's own resources — ground your guidance in this):\n${constellation.bundle.slice(0, 6000)}` : "");
 
   const setStatusMapped = (s: ConnStatus) => {
@@ -271,8 +291,8 @@ export default function App() {
           if (it.status === "done") { next[idx] = { ...next[idx], status: "done", outcome: it.outcome || "", t: Date.now() }; continue; }
           if (next[idx].status === "done") continue;
           // Robin's own wording is his — the AI may reprioritise it, never rewrite it.
-          if (next[idx].source === "you") continue;
-          next[idx] = { ...next[idx], ...(it.type ? { type: it.type } : {}), ...(it.text ? { text: it.text } : {}), t: Date.now() };
+          if (next[idx].source === "you") { if (typeof it.live === "boolean") next[idx] = { ...next[idx], live: it.live }; continue; }
+          next[idx] = { ...next[idx], ...(it.type ? { type: it.type } : {}), ...(it.text ? { text: it.text } : {}), ...(typeof it.live === "boolean" ? { live: it.live } : {}), t: Date.now() };
           continue;
         }
       }
@@ -291,7 +311,7 @@ export default function App() {
     lastFeedRef.current = now;
     const seq = ++feedSeqRef.current;
     const ctx = lines.slice(-40).map(l => `[${l.speaker}]: ${l.text}`).join("\n");
-    const existing = feedRef.current.slice(0, 24).map(x => ({ id: x.id, type: x.type, text: x.text, done: x.status === "done", votes: x.votes, source: x.source }));
+    const existing = feedRef.current.slice(0, 24).map(x => ({ id: x.id, type: x.type, text: x.text, done: x.status === "done", votes: x.votes, source: x.source, ...(x.live === false ? { live: false } : {}) }));
     const opts = { context: pulseContext, goal: goal.trim(), bundleHint: constellation?.bundle.slice(0, 2000) ?? "", meetingTitle: selectedMeeting?.title || "Meeting", agenda: !!flags.agenda };
     fetchFeed(ctx, orKey, opts, fastModel, existing).then(result => {
       if (seq !== feedSeqRef.current || !result) return; // stale response, drop
@@ -410,6 +430,112 @@ export default function App() {
   };
   useEffect(() => { runSentiment(); }, [lines, flags.sentiment, orKey, fastModel, status]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── EXPERIMENT: conversation map ────────────────────────────────
+  // Slowest loop in the app (90s): a tree of topics moves at the pace of the
+  // conversation's shape, not its words, so polling it fast is wasted money.
+  const runGraph = async () => {
+    if (!flags.graph || !orKey || lines.length < 3 || status !== "connected") { graphSeqRef.current++; return; }
+    const now = Date.now();
+    if (now - lastGraphRef.current < 60000) return;
+    lastGraphRef.current = now;
+    const ctx = lines.slice(-50).map(l => `[${l.speaker}]: ${l.text}`).join("\n");
+    const existing = graphRef.current.map(n => ({ id: n.id, label: n.label, parent: n.parent, state: n.state }));
+    const seq = ++graphSeqRef.current;
+    try {
+      const result = await fetchGraph(ctx, orKey, goal.trim(), fastModel, existing);
+      if (seq !== graphSeqRef.current || !result) return;
+      // Merged outside the state updater: it mints ids from a ref, and React
+      // dev-mode calls updaters twice to check purity (which would burn ids).
+      const next = [...graphRef.current];
+      // Negative ids are the model's temporary handles, so it can add a topic
+      // AND its branch in one pass. Resolve them to real ids as we go.
+      const temp = new Map<number, number>();
+      const real = (id: number | null) => id == null ? null : id < 0 ? temp.get(id) ?? null : id;
+      let tip: number | null = null;
+      for (const n of result.nodes) {
+        const existing = n.id != null && n.id >= 0 ? next.findIndex(x => x.id === n.id) : -1;
+        if (existing >= 0) {
+          const parent = real(n.parent);
+          next[existing] = {
+            ...next[existing], state: n.state, ...(n.label ? { label: n.label } : {}),
+            // The tree may only GAIN structure: a late parent links a node up,
+            // but a null never detaches one that already has a place.
+            ...(parent != null && parent !== n.id ? { parent } : {}),
+            t: Date.now(),
+          };
+          if (n.state === "active") tip = n.id;
+          continue;
+        }
+        if (!n.label) continue;
+        const dupe = next.find(x => x.label.toLowerCase() === n.label.toLowerCase());
+        if (dupe) { if (n.id != null && n.id < 0) temp.set(n.id, dupe.id); continue; }
+        const id = graphIdRef.current++;
+        if (n.id != null && n.id < 0) temp.set(n.id, id);
+        if (n.state === "active") tip = id;
+        next.push({ id, label: n.label, parent: real(n.parent), state: n.state, t: Date.now() });
+      }
+      if (tip == null) tip = real(result.current);
+      // Exactly one tip: whatever the model named active wins. And exactly one
+      // tree: a topic that surfaced with no stated parent grew out of wherever
+      // the conversation was standing.
+      const tipped = tip == null ? next : next.map(x => x.id === tip ? { ...x, state: "active" as const } : x.state === "active" ? { ...x, state: "explored" as const } : x);
+      setGraph(graftOrphans(tipped, tip ?? graphCurrent));
+      if (tip != null) setGraphCurrent(tip);
+    } catch {}
+  };
+  useEffect(() => { runGraph(); }, [lines, flags.graph, orKey, fastModel, goal, status]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Walking back onto an unwalked branch: mark it active (the tree re-roots on
+  // it) and push it to the top of the live feed as Robin's own item, so the
+  // feed loop and the Say-this draft both steer there.
+  const pickUpBranch = (node: GraphNode) => {
+    graphSeqRef.current++;
+    lastGraphRef.current = 0;
+    setGraph(prev => prev.map(n => n.id === node.id ? { ...n, state: "active" as const, t: Date.now() } : n.state === "active" ? { ...n, state: "explored" as const } : n));
+    setGraphCurrent(node.id);
+    setPickedNode(node.id);
+    setFeed(prev => prev.some(item => item.text.toLowerCase() === node.label.toLowerCase())
+      ? prioritize(prev.map(item => item.text.toLowerCase() === node.label.toLowerCase() ? { ...item, votes: item.votes + 1, t: Date.now() } : item))
+      : prioritize([...prev, { id: sidRef.current++, type: "branch" as const, text: node.label, votes: 2, source: "you" as const, t: Date.now() }]));
+  };
+
+  // Infinite canvas: pan by dragging, zoom toward the pointer. The map auto-
+  // recentres on the growing tip until Robin moves it himself — then it stays
+  // where he put it, because a canvas that yanks itself around mid-meeting is
+  // worse than one that drifts off screen.
+  const recenterMap = () => {
+    const el = mapViewportRef.current;
+    const w = el?.clientWidth ?? 900, h = el?.clientHeight ?? 600;
+    const placed = layoutMycelium(graph);
+    mapTouchedRef.current = false;
+    if (!placed.length) { setMapView({ tx: w / 2, ty: h / 2, k: 1 }); return; }
+    // Fit the whole colony, with room for the satellites and labels hanging off it.
+    const LABEL = 300;
+    const minX = Math.min(...placed.map(p => p.x)) - LABEL, maxX = Math.max(...placed.map(p => p.x)) + LABEL;
+    const minY = Math.min(...placed.map(p => p.y)) - 40, maxY = Math.max(...placed.map(p => p.y)) + 40;
+    const k = Math.min(1.1, Math.max(0.28, Math.min(w / (maxX - minX), h / (maxY - minY))));
+    setMapView({ k, tx: w / 2 - ((minX + maxX) / 2) * k, ty: h / 2 - ((minY + maxY) / 2) * k });
+  };
+  useEffect(() => { if (!mapTouchedRef.current) recenterMap(); }, [graph.length, graphCurrent, view]); // eslint-disable-line react-hooks/exhaustive-deps
+  const startMapPan = (e: React.MouseEvent) => {
+    e.preventDefault();
+    mapTouchedRef.current = true;
+    const start = { x: e.clientX, y: e.clientY, tx: mapView.tx, ty: mapView.ty };
+    const move = (ev: MouseEvent) => setMapView(v => ({ ...v, tx: start.tx + (ev.clientX - start.x), ty: start.ty + (ev.clientY - start.y) }));
+    const up = () => { document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up); };
+    document.addEventListener("mousemove", move); document.addEventListener("mouseup", up);
+  };
+  const zoomMap = (e: React.WheelEvent) => {
+    mapTouchedRef.current = true;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const px = e.clientX - rect.left, py = e.clientY - rect.top;
+    setMapView(v => {
+      const k = Math.min(2.6, Math.max(0.25, v.k * Math.exp(-e.deltaY * 0.0016)));
+      // Keep the point under the cursor pinned while the scale changes.
+      return { k, tx: px - (px - v.tx) * (k / v.k), ty: py - (py - v.ty) * (k / v.k) };
+    });
+  };
+
   const refreshNav = () => { lastNavRef.current = 0; runNav(); };
   // Manual override for the slow Say-this cadence — redraft now.
   const redraftAnswer = () => { lastAnswerRef.current = 0; liveAnswerRef.current = ""; setRedraftTick(n => n + 1); };
@@ -433,7 +559,8 @@ export default function App() {
   // Everything that belongs to ONE conversation. Shared by "connect to a new
   // meeting" and the Reset button.
   const clearMeetingState = () => {
-    setLines([]); setFeed([]); setSentiments([]); setFeedInput(""); setLiveAnswer(""); setPendingCmd(null); setNavFrame(null);
+    setLines([]); setFeed([]); setSentiments([]); setFeedInput(""); setLiveAnswer(""); setNavFrame(null);
+    setGraph([]); setGraphCurrent(null); setPickedNode(null); graphSeqRef.current++; lastGraphRef.current = 0; graphIdRef.current = 1;
     navSeqRef.current++; feedSeqRef.current++; sentimentSeqRef.current++;
     setNavBusy(false); lastNavRef.current = 0; lastSentimentRef.current = 0; lastFeedRef.current = 0; lastAnswerRef.current = 0; sidRef.current = 1;
     liveAnswerRef.current = ""; scriptWordsRef.current = []; consumedTranscriptWordsRef.current.clear(); scriptPointerRef.current = 0; missStreakRef.current = 0;
@@ -475,6 +602,7 @@ export default function App() {
       if (e.key === "1") { e.preventDefault(); setView("transcript"); }
       else if (e.key === "2") { e.preventDefault(); setView("split"); }
       else if (e.key === "3") { e.preventDefault(); setView("chat"); }
+      else if (e.key === "4") { e.preventDefault(); setView("map"); }
       else if (e.key.toLowerCase() === "k") { e.preventDefault(); if (!meetingsOpen && ffKey) loadMeetings(); setMeetingsOpen(o => !o); }
       else if (e.key.toLowerCase() === "u") { e.preventDefault(); setQuestionMode(q => !q); }
       else if (e.key.toLowerCase() === "j") { e.preventDefault(); if (view === "transcript") setView("split"); setTab("chat"); setTimeout(() => chatComposerRef.current?.focus(), 0); }
@@ -533,7 +661,7 @@ export default function App() {
     setTab("pi");
     const uid = Date.now();
     setPiMessages(prev => [...prev, { id: uid, role: "user", text: t }]);
-    if (!bridgeOnline) { setPiMessages(prev => [...prev, { id: uid + 1, role: "agent", text: "⚠ PI bridge offline — is the dev server running?" }]); return; }
+    if (!bridgeOnline) { setPiMessages(prev => [...prev, { id: uid + 1, role: "agent", text: "⚠ Command bridge offline — is the dev server running?" }]); return; }
     setPiThinking(true);
     const aid = uid + 1; let started = false;
     piAbortRef.current?.abort(); // supersede: stop the previous stream's child + network work
@@ -544,7 +672,7 @@ export default function App() {
         if (!started) { started = true; setPiThinking(false); setPiMessages(prev => [...prev, { id: aid, role: "agent", text: partial }]); }
         else setPiMessages(prev => prev.map(m => m.id === aid ? { ...m, text: partial } : m));
       }, controller.signal);
-    } catch { if (!controller.signal.aborted) setPiMessages(prev => [...prev, { id: aid, role: "agent", text: "⚠ PI unreachable." }]); }
+    } catch { if (!controller.signal.aborted) setPiMessages(prev => [...prev, { id: aid, role: "agent", text: "⚠ Claude unreachable." }]); }
     if (!started && !controller.signal.aborted) setPiMessages(prev => [...prev, { id: aid, role: "agent", text: "_(no output)_" }]);
     setPiThinking(false);
   };
@@ -553,12 +681,32 @@ export default function App() {
   // Ask / Do / Note → meeting chat (has transcript context); Command → confirm
   // first: the text is transcript-derived (untrusted speakers) and /pi runs with
   // bash/write access, so it must never execute on a single click.
+  // A command never runs on a click. It is dressed with the meeting context
+  // Claude needs to act inside the workspace, dropped into the command
+  // composer, and left there for Robin to read, edit and send.
+  const stageCommand = (text: string) => {
+    const recent = groupedRef.current.slice(-6).map(l => `[${l.speaker}]: ${l.text}`).join("\n");
+    setPiInput([
+      `You are acting from a live meeting in the Thrivbe AI workspace (your working directory). Do this now:`,
+      "",
+      text,
+      "",
+      `— Context —`,
+      `Meeting: ${selectedMeeting?.title || "Live meeting"}`,
+      goal.trim() ? `Robin's goal for this call: ${goal.trim()}` : "",
+      constellation?.counterpart ? `Talking with: ${constellation.counterpart}` : "",
+      recent ? `Last exchanges:\n${recent}` : "",
+      "",
+      `Work in this workspace, use what's already here, and report back briefly what you did.`,
+    ].filter(Boolean).join("\n"));
+    setTab("pi");
+    if (view === "transcript" || view === "map") setView("split");
+    setTimeout(() => piComposerRef.current?.focus(), 0);
+  };
   const openFeedItem = (item: FeedItem) => {
-    if (item.type === "command") setPendingCmd(item.text);
+    if (item.type === "command") stageCommand(item.text);
     else askChat(item.text);
   };
-  const confirmPendingCmd = () => { if (pendingCmd) { const c = pendingCmd; setPendingCmd(null); sendPI(c); } };
-  const cancelPendingCmd = () => setPendingCmd(null);
   const toggleFeedItem = (id: number) => {
     feedSeqRef.current++;
     setFeed(prev => prioritize(prev.map(item => {
@@ -603,6 +751,7 @@ export default function App() {
       `Status: ${statusLabel}`,
       `\n## Transcript\n${transcript}`,
       agendaMd ? `\n## Agenda (priority order)\n${agendaMd}` : "",
+      graph.length ? `\n## Conversation map\n${layoutMycelium(graph).sort((a, b) => a.depth - b.depth || a.angle - b.angle).map(n => `${"  ".repeat(n.depth)}- ${n.label} — ${n.state}`).join("\n")}\n\nBranches not taken: ${graph.filter(n => n.state === "open").map(n => n.label).join(" · ") || "none"}` : "",
       `\n## Live Feed\n${liveFeed}`,
       liveAnswer ? `\n## Question Mode Draft\n${liveAnswer}` : "",
       navFrame ? `\n## Navigator\nPhase: ${navFrame.phase} · Stance: ${navFrame.stance} · Progress: ${navFrame.goal_progress} · Next move: ${navFrame.next_move} · Risk: ${navFrame.risk}` : "",
@@ -642,7 +791,7 @@ export default function App() {
   };
 
   // derived
-  const isSplit = view === "split", isChat = view === "chat";
+  const isSplit = view === "split", isChat = view === "chat", isMap = view === "map";
   const isConnected = status === "connected", isConnecting = status === "connecting", isIdle = status === "idle";
   const hasTranscript = grouped.length > 0;
   const statusColor = isConnected ? "oklch(0.68 0.16 155)" : isConnecting ? "oklch(0.78 0.14 75)" : "oklch(0.7 0.01 250)";
@@ -708,8 +857,10 @@ export default function App() {
 
   const renderComposer = (value: string, onChange: (v: string) => void, onSend: () => void, placeholder: string, inputRef?: Ref<HTMLTextAreaElement>) => (
     <div className="fl-composer" style={{ display: "flex", alignItems: "flex-end", gap: 10, padding: "8px 8px 8px 18px", background: "#fff", border: `1px solid ${BORDER}`, borderRadius: 16, boxShadow: "0 1px 2px rgba(16,24,40,.04)" }}>
-      <textarea ref={inputRef} value={value} onChange={e => onChange(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onSend(); } }} placeholder={placeholder} rows={1}
-        style={{ flex: "1 1 auto", minWidth: 0, border: "none", outline: "none", background: "none", resize: "none", fontFamily: "inherit", fontSize: 14.5, lineHeight: 1.5, color: "oklch(0.3 0.02 255)", padding: "9px 0", maxHeight: 120 }} />
+      <textarea ref={inputRef} value={value} onChange={e => onChange(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onSend(); } }} placeholder={placeholder}
+        // Grows with a staged command so it can be read and edited, not just squinted at.
+        rows={Math.min(12, value.split("\n").length)}
+        style={{ flex: "1 1 auto", minWidth: 0, border: "none", outline: "none", background: "none", resize: "none", fontFamily: "inherit", fontSize: 14.5, lineHeight: 1.5, color: "oklch(0.3 0.02 255)", padding: "9px 0", maxHeight: 260 }} />
       <button onClick={onSend} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 42, height: 42, borderRadius: 11, background: "var(--ac)", border: "none", color: "#fff", cursor: "pointer", flex: "0 0 auto" }}><Icon id="i-send" /></button>
     </div>
   );
@@ -915,23 +1066,37 @@ export default function App() {
     <section style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", minHeight: 0 }}>
       {sectionLabel("i-bulb", "Live feed", <span style={{ fontSize: 12, fontWeight: 600, color: "oklch(0.6 0.015 255)" }}>{visibleFeed.length}/{feed.length}</span>)}
       <div style={{ marginTop: 16, display: "flex", flexDirection: "column", flex: "1 1 auto", minHeight: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 12.5, color: "oklch(0.55 0.015 255)", fontWeight: 600 }}><Icon id="i-gauge" size={15} />Pulse rate</span>
-          <div style={{ flex: "1 1 auto" }} />
-          <select value={rate} onChange={e => setRate(e.target.value)} className="fl-focus" style={{ appearance: "none", WebkitAppearance: "none", padding: "9px 38px 9px 14px", border: `1px solid ${BORDER}`, borderRadius: 10, background: "#fff url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E\") no-repeat right 12px center", fontFamily: "inherit", fontSize: 13, fontWeight: 600, color: "oklch(0.3 0.02 255)", cursor: "pointer", outline: "none" }}>
-            {RATES.map(r => <option key={r.v} value={r.v}>{r.l}</option>)}
-          </select>
+        {/* SHOW — which kinds of item. Each chip wears its type's own colour,
+            so the filter row and the list read as one taxonomy. */}
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 7, marginBottom: 10 }}>
+          <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "oklch(0.68 0.012 255)", marginRight: 3 }}>Show</span>
+          <button onClick={() => setFilters([])} style={{ ...typeChip(filters.length === 0, C.text, C.tint, false), fontWeight: 700 }}>All<span style={countBadge(filters.length === 0)}>{feed.length}</span></button>
+          {FILTERS.map(f => { const active = filters.includes(f.id); return (
+            <button key={f.id} onClick={() => toggleFilter(f.id)} title={`${active ? "Hide" : "Show"} ${f.l.toLowerCase()} items`} style={typeChip(active, f.color, f.bg, counts[f.id] === 0)}>
+              <Icon id={f.ic} size={13} stroke={active ? f.color : "oklch(0.6 0.015 255)"} />{f.l}<span style={countBadge(active)}>{counts[f.id]}</span>
+            </button>
+          ); })}
         </div>
-        <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 9, marginBottom: 14 }}>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 9, flex: "1 1 auto" }}>
-            <button onClick={() => setFilters([])} style={filterChip(filters.length === 0)}>All<span style={countBadge(filters.length === 0)}>{feed.length}</span></button>
-            {FILTERS.map(f => { const active = filters.includes(f.id); return (
-              <button key={f.id} onClick={() => toggleFilter(f.id)} style={filterChip(active)}>{f.l}<span style={countBadge(active)}>{counts[f.id]}</span></button>
-            ); })}
-            <button onClick={() => setHideDone(d => !d)} title="Hide items already handled" style={filterChip(hideDone)}>{hideDone ? "✓ " : ""}Hide done</button>
-          </div>
-          <select value={feedSort} onChange={e => setFeedSort(e.target.value as FeedSort)} className="fl-focus" aria-label="Sort live feed" style={{ appearance: "none", WebkitAppearance: "none", padding: "8px 30px 8px 11px", border: `1px solid ${BORDER}`, borderRadius: 10, background: "#fff url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E\") no-repeat right 9px center", fontFamily: "inherit", fontSize: 12, fontWeight: 600, color: "oklch(0.3 0.02 255)", cursor: "pointer", outline: "none" }}>
-            <option value="priority">Priority</option><option value="newest">Newest</option><option value="oldest">Oldest</option><option value="type">Type</option><option value="open">Open first</option>
+        {/* VIEW — how the same items are ordered and trimmed. Deliberately one
+            neutral weight below the coloured chips: ordering is not a taxonomy. */}
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 7, marginBottom: 14 }}>
+          <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "oklch(0.68 0.012 255)", marginRight: 3 }}>Sort</span>
+          <select value={feedSort} onChange={e => setFeedSort(e.target.value as FeedSort)} className="fl-focus" aria-label="Sort live feed"
+            style={{ ...viewControl(feedSort !== "priority"), appearance: "none", WebkitAppearance: "none", paddingRight: 26, outline: "none", backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E\")", backgroundRepeat: "no-repeat", backgroundPosition: "right 7px center" }}>
+            <option value="priority">Priority — votes first</option>
+            <option value="newest">Newest first</option>
+            <option value="oldest">Oldest first</option>
+            <option value="type">Grouped by type</option>
+            <option value="open">Unhandled first</option>
+          </select>
+          <button onClick={() => setHideDone(d => !d)} title="Hide items already handled" style={viewControl(hideDone)}>
+            <Icon id={hideDone ? "i-check" : "i-x"} size={13} />Hide done
+          </button>
+          <div style={{ flex: "1 1 auto" }} />
+          <span title="How often the AI re-reads the conversation" style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "oklch(0.68 0.012 255)" }}><Icon id="i-gauge" size={13} />Pulse</span>
+          <select value={rate} onChange={e => setRate(e.target.value)} className="fl-focus" aria-label="Pulse rate"
+            style={{ ...viewControl(rate === "off"), appearance: "none", WebkitAppearance: "none", paddingRight: 26, outline: "none", backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E\")", backgroundRepeat: "no-repeat", backgroundPosition: "right 7px center" }}>
+            {RATES.map(r => <option key={r.v} value={r.v}>{r.l}</option>)}
           </select>
         </div>
         {!orKey && <div style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 11.5, fontWeight: 600, color: "oklch(0.6 0.015 255)", marginBottom: 14 }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: "oklch(0.78 0.14 75)" }} />AI offline — set OPENROUTER_API</div>}
@@ -983,10 +1148,10 @@ export default function App() {
 
   const piPanel = (
     <section style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", minHeight: 0 }}>
-      {sectionLabel("i-terminal", "PI", <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 600, color: "oklch(0.6 0.015 255)" }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: bridgeOnline ? "oklch(0.68 0.16 155)" : "oklch(0.7 0.01 250)" }} />{bridgeOnline ? "online" : "offline"}</span>)}
+      {sectionLabel("i-terminal", "Command", <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 600, color: "oklch(0.6 0.015 255)" }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: bridgeOnline ? "oklch(0.68 0.16 155)" : "oklch(0.7 0.01 250)" }} />{bridgeOnline ? "online" : "offline"}</span>)}
       <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 18, flex: "1 1 auto", minHeight: 0 }}>
         <div ref={piPanelScrollRef} onScroll={onPiPanelScroll} className="fl-scroll" style={{ display: "flex", flexDirection: "column", gap: 20, flex: "1 1 auto", minHeight: 0, overflowY: "auto", paddingRight: 4 }}>{renderThread(piMessages, piThinking)}</div>
-        {renderComposer(piInput, setPiInput, submitPI, "Message PI — ask, or run a command…")}
+        {renderComposer(piInput, setPiInput, submitPI, "Tell Claude what to do in the workspace…", piComposerRef)}
       </div>
     </section>
   );
@@ -1006,24 +1171,163 @@ export default function App() {
     </div>
   );
 
-  // ── Config slide-over ─────────────────────────────────────────────
-  // Confirm gate for transcript-derived commands. Cancel is the default/safe
-  // action (autoFocus), so Enter never auto-runs the command.
-  const cmdConfirm = pendingCmd !== null && (
-    <>
-      <div onClick={cancelPendingCmd} style={{ position: "fixed", inset: 0, background: "oklch(0.2 0.02 260 / 0.32)", zIndex: 95 }} />
-      <div role="alertdialog" aria-label="Confirm command" style={{ position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: 520, maxWidth: "92vw", background: "oklch(0.99 0.003 250)", border: `1px solid ${BORDER}`, borderRadius: 16, boxShadow: "0 24px 60px -20px rgba(16,24,40,.45)", zIndex: 96, padding: "24px 26px", display: "flex", flexDirection: "column", gap: 14 }}>
-        <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 16, fontWeight: 700, color: "oklch(0.27 0.025 255)" }}>⚠ Run this command from the meeting on your machine?</div>
-        <pre style={{ margin: 0, fontFamily: "JetBrains Mono,monospace", fontSize: 12.5, background: "oklch(0.96 0.008 250)", padding: "12px 14px", borderRadius: 10, whiteSpace: "pre-wrap", wordBreak: "break-all", color: "oklch(0.3 0.02 255)" }}>{pendingCmd}</pre>
-        <div style={{ fontSize: 12.5, lineHeight: 1.55, color: "oklch(0.5 0.02 255)" }}>This suggestion was generated from live transcript text — words spoken by meeting participants — and runs with bash/write access via the PI agent.</div>
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-          <button autoFocus onClick={cancelPendingCmd} className="fl-hover-soft" style={{ padding: "10px 16px", background: "#fff", border: `1px solid ${BORDER}`, borderRadius: 11, color: "oklch(0.35 0.02 255)", fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Cancel</button>
-          <button onClick={confirmPendingCmd} style={{ padding: "10px 16px", background: "oklch(0.55 0.16 25)", border: "1px solid oklch(0.5 0.16 25)", borderRadius: 11, color: "#fff", fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Run command</button>
+  // ── EXPERIMENT: conversation map view ─────────────────────────────
+  const mapCard = (() => {
+    const placed = layoutMycelium(graph);
+    const spine = new Set(pathToRoot(graph, graphCurrent));
+    const at = new Map(placed.map(p => [p.id, p]));
+    // Where each item hangs: history stays where it happened, open
+    // possibilities travel with the conversation and orbit where we are now.
+    const byHost = new Map<number, typeof visibleFeed>();
+    for (const item of visibleFeed) {
+      const host = anchorFor(item, graph, graphCurrent);
+      if (host == null) continue;
+      byHost.set(host, [...(byHost.get(host) ?? []), item]);
+    }
+    const satellites = [...byHost.entries()].flatMap(([hostId, items]) => {
+      const host = at.get(hostId);
+      if (!host) return [];
+      // Fan them around the host and stagger the reach in three tiers, so a
+      // busy topic's items don't stack their labels on each other. The tip
+      // carries every live possibility, so give it a wider fan and more room.
+      const isTip = hostId === graphCurrent;
+      const step = isTip ? Math.min(0.62, (Math.PI * 1.5) / Math.max(1, items.length)) : 0.66;
+      return items.map((item, i) => {
+        const angle = host.angle + (i - (items.length - 1) / 2) * step;
+        const r = (isTip ? 130 : 100) + (i % 3) * 40;
+        const open = isOpenPossibility(item);
+        // A live possibility that came up earlier keeps a faint thread back to
+        // where it was born — you can see it being carried along.
+        const bornAt = open ? at.get(hostNodeId(item.t, graph) ?? -1) : undefined;
+        return {
+          item, host, open,
+          origin: bornAt && bornAt.id !== host.id ? bornAt : undefined,
+          x: host.x + Math.cos(angle) * r, y: host.y + Math.sin(angle) * r, flip: Math.cos(angle) < -0.2,
+        };
+      });
+    });
+    const liveCount = visibleFeed.filter(isOpenPossibility).length;
+    const STATE: Record<string, { fill: string; stroke: string; text: string; hypha: string; dashed?: boolean }> = {
+      active: { fill: "var(--ac)", stroke: "var(--ac)", text: "oklch(0.27 0.025 255)", hypha: "var(--ac)" },
+      explored: { fill: "#fff", stroke: "oklch(0.7 0.1 242)", text: "oklch(0.34 0.02 255)", hypha: "oklch(0.82 0.05 242)" },
+      open: { fill: "oklch(0.97 0.05 75)", stroke: "oklch(0.72 0.14 70)", text: "oklch(0.45 0.12 70)", hypha: "oklch(0.8 0.11 75)", dashed: true },
+      dropped: { fill: "oklch(0.97 0.004 250)", stroke: "oklch(0.85 0.008 255)", text: "oklch(0.68 0.012 255)", hypha: "oklch(0.9 0.006 255)", dashed: true },
+    };
+    const openCount = graph.filter(n => n.state === "open").length;
+    const radiusOf = (p: typeof placed[number]) => p.state === "active" ? 11 : p.depth === 0 ? 9 : 7;
+    return (
+      <div style={{ ...cardBase, flex: "1 1 auto", minWidth: 0 }}>
+        <div style={{ padding: "24px 28px", display: "flex", alignItems: "center", gap: 14, flex: "0 0 auto", borderBottom: "1px solid oklch(0.95 0.005 250)" }}>
+          <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 40, height: 40, borderRadius: 11, background: "var(--ac-tint)", flex: "0 0 auto" }}><Icon id="i-command" size={19} stroke="var(--ac)" /></span>
+          <div style={{ minWidth: 0, flex: "1 1 auto" }}>
+            <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 17, fontWeight: 700, color: "oklch(0.27 0.025 255)", letterSpacing: "-0.01em" }}>Conversation map <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 7px", borderRadius: 999, background: "oklch(0.96 0.03 290)", color: "oklch(0.52 0.15 290)", verticalAlign: "2px" }}>EXPERIMENT</span></div>
+            <div style={{ fontSize: 13, color: "oklch(0.6 0.015 255)", marginTop: 2 }}>{graph.length} topics · <strong style={{ color: "var(--ac-text)" }}>{liveCount} open right now</strong> · {satellites.length - liveCount} in the record · {openCount} branch{openCount === 1 ? "" : "es"} not taken</div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 14, flex: "0 0 auto", fontSize: 12 }}>
+            {[["active", "here now"], ["explored", "walked"], ["open", "not taken"], ["dropped", "dropped"]].map(([k, l]) => (
+              <span key={k} style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "oklch(0.5 0.02 255)" }}>
+                <span style={{ width: 11, height: 11, borderRadius: "50%", background: STATE[k].fill, border: `1.5px ${STATE[k].dashed ? "dashed" : "solid"} ${STATE[k].stroke}` }} />{l}
+              </span>
+            ))}
+            <button onClick={recenterMap} title="Recentre on the living tip" className="fl-hover-soft" style={{ ...iconBtn, width: 34, height: 34 }}><Icon id="i-search" size={16} /></button>
+            <button onClick={() => { lastGraphRef.current = 0; runGraph(); }} title="Grow the map now" className="fl-hover-soft" style={{ ...iconBtn, width: 34, height: 34 }}><Icon id="i-refresh" size={16} /></button>
+          </div>
         </div>
+        {/* Same chips as the feed, same state — filtering in one place filters
+            both. The topic tree always stays: it IS the trajectory. */}
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 7, padding: "12px 28px", borderBottom: "1px solid oklch(0.95 0.005 250)", flex: "0 0 auto" }}>
+          <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "oklch(0.68 0.012 255)", marginRight: 3 }}>Show on map</span>
+          <button onClick={() => setFilters([])} style={{ ...typeChip(filters.length === 0, C.text, C.tint, false) }}>All<span style={countBadge(filters.length === 0)}>{feed.length}</span></button>
+          {FILTERS.map(f => { const active = filters.includes(f.id); return (
+            <button key={f.id} onClick={() => toggleFilter(f.id)} style={typeChip(active, f.color, f.bg, counts[f.id] === 0)}>
+              <Icon id={f.ic} size={13} stroke={active ? f.color : "oklch(0.6 0.015 255)"} />{f.l}<span style={countBadge(active)}>{counts[f.id]}</span>
+            </button>
+          ); })}
+          <button onClick={() => setHideDone(d => !d)} style={viewControl(hideDone)}><Icon id={hideDone ? "i-check" : "i-x"} size={13} />Hide done</button>
+        </div>
+        <div ref={mapViewportRef} style={{ flex: "1 1 auto", minHeight: 0, overflow: "hidden", position: "relative", background: "radial-gradient(900px 600px at 50% 40%, var(--ac-tint), transparent 70%)" }}>
+          {placed.length === 0 ? (
+            <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", padding: 48, gap: 12 }}>
+              <Icon id="i-command" size={34} stroke="oklch(0.8 0.01 255)" />
+              <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 19, fontWeight: 700, color: "oklch(0.4 0.02 255)" }}>The colony grows once you connect</div>
+              <div style={{ fontSize: 14, lineHeight: 1.6, color: "oklch(0.58 0.015 255)", maxWidth: 460 }}>Every topic sprouts a node and creeps outward. Directions that come up but nobody follows stay as dashed filaments — click one to walk back onto it.</div>
+            </div>
+          ) : (
+            <svg className="fl-map-canvas" width="100%" height="100%" onMouseDown={startMapPan} onWheel={zoomMap} style={{ display: "block", position: "absolute", inset: 0 }}>
+              <g transform={`translate(${mapView.tx},${mapView.ty}) scale(${mapView.k})`}>
+                {placed.map(p => {
+                  const parent = p.parent == null ? undefined : at.get(p.parent);
+                  if (!parent) return null;
+                  const s = STATE[p.state] ?? STATE.explored;
+                  const onSpine = spine.has(p.id) && spine.has(parent.id);
+                  // Bow the filament sideways so it creeps rather than points.
+                  const mx = (parent.x + p.x) / 2, my = (parent.y + p.y) / 2;
+                  const bow = (wobbleOf(p.id) - 0.5) * 60;
+                  const nx = -(p.y - parent.y), ny = p.x - parent.x;
+                  const len = Math.hypot(nx, ny) || 1;
+                  return <path key={`e${p.id}`} className="fl-hypha"
+                    d={`M${parent.x},${parent.y} Q${mx + (nx / len) * bow},${my + (ny / len) * bow} ${p.x},${p.y}`}
+                    fill="none" stroke={onSpine ? "var(--ac)" : s.hypha} strokeWidth={onSpine ? 2.6 : 1.6} strokeLinecap="round"
+                    strokeDasharray={s.dashed ? "6 5" : undefined}
+                    style={s.dashed ? undefined : { ["--len" as string]: 900, strokeDasharray: 900 }} />;
+                })}
+                {/* Feed items: a thin tether to the topic they came up under. */}
+                {satellites.map(({ item, host, origin, open, x, y, flip }) => {
+                  const m = SUGMETA[item.type];
+                  const done = item.status === "done";
+                  const past = !done && POSSIBILITY_TYPES.includes(item.type) && item.live === false;
+                  const lines = wrapLabel(item.text, 22, 2);
+                  const r = open ? 6 : 5;
+                  return (
+                    <g key={`s${item.id}`} className="fl-walkable" onClick={() => openFeedItem(item)} opacity={done ? 0.45 : past ? 0.6 : 1}>
+                      <title>{`${m.kind}${open ? " · open right now" : past ? " · the moment for this has passed" : ""}: ${item.text}`}</title>
+                      {origin && <path d={`M${origin.x},${origin.y} L${x},${y}`} fill="none" stroke={m.color} strokeWidth={0.8} strokeDasharray="1 7" opacity={0.3} />}
+                      <path className="fl-hypha" d={`M${host.x},${host.y} L${x},${y}`} fill="none" stroke={m.color} strokeWidth={open ? 1.3 : 1} strokeDasharray={open ? "4 3" : "2 4"} opacity={open ? 0.75 : 0.45} />
+                      {open && <circle cx={x} cy={y} r={r + 5} fill={m.color} opacity={0.18} style={{ animation: "fl-halo 3.2s ease-out infinite", transformBox: "fill-box", transformOrigin: "center" }} />}
+                      <rect className="fl-node" x={x - r} y={y - r} width={r * 2} height={r * 2} rx={item.votes > 0 ? 2 : 3}
+                        fill={open ? m.bg : "#fff"} stroke={m.color} strokeWidth={open ? 2 : 1.5} strokeDasharray={past ? "2 2" : undefined}
+                        transform={item.votes > 0 ? `rotate(45 ${x} ${y})` : undefined} />
+                      <text className="fl-node-label" x={flip ? x - 11 : x + 11} y={y + 3.5 - (lines.length - 1) * 6} textAnchor={flip ? "end" : "start"}
+                        fill={m.color} fontSize={open ? 11.5 : 10.5} fontWeight={open ? 700 : 600} fontFamily="inherit"
+                        stroke="#fff" strokeWidth={3} paintOrder="stroke" strokeLinejoin="round"
+                        style={done ? { textDecoration: "line-through" } : undefined}>
+                        {lines.map((line, i) => <tspan key={i} x={flip ? x - 11 : x + 11} dy={i === 0 ? 0 : 12}>{line}</tspan>)}
+                      </text>
+                    </g>
+                  );
+                })}
+                {placed.map(p => {
+                  const s = STATE[p.state] ?? STATE.explored;
+                  const walkable = p.state === "open" || p.state === "dropped";
+                  const r = radiusOf(p);
+                  const flip = Math.cos(p.angle) < -0.2; // label on the inside of the ring
+                  const lines = wrapLabel(p.label);
+                  const lx = flip ? p.x - r - 8 : p.x + r + 8;
+                  return (
+                    <g key={p.id} className={walkable ? "fl-walkable" : undefined} onClick={walkable ? () => pickUpBranch(p) : undefined}>
+                      <title>{walkable ? `Walk back onto: ${p.label}` : p.label}</title>
+                      {p.state === "active" && <circle cx={p.x} cy={p.y} r={r + 4} fill="var(--ac)" opacity={0.35} style={{ animation: "fl-halo 2.8s ease-out infinite", transformBox: "fill-box", transformOrigin: "center" }} />}
+                      <circle className={p.state === "active" ? "fl-node fl-tip" : "fl-node"} cx={p.x} cy={p.y} r={r}
+                        fill={s.fill} stroke={pickedNode === p.id ? "var(--ac)" : s.stroke} strokeWidth={pickedNode === p.id ? 3 : 2}
+                        strokeDasharray={s.dashed ? "3 3" : undefined} />
+                      <text className="fl-node-label" x={lx} y={p.y + 4.5 - (lines.length - 1) * 7} textAnchor={flip ? "end" : "start"}
+                        fill={s.text} fontSize="12.5" fontWeight={p.state === "active" ? 700 : 600} fontFamily="inherit"
+                        stroke="#fff" strokeWidth={3.5} paintOrder="stroke" strokeLinejoin="round">
+                        {lines.map((line, i) => <tspan key={i} x={lx} dy={i === 0 ? 0 : 14}>{line}</tspan>)}
+                      </text>
+                    </g>
+                  );
+                })}
+              </g>
+            </svg>
+          )}
+        </div>
+        {openCount > 0 && <div style={{ padding: "12px 28px", borderTop: "1px solid oklch(0.95 0.005 250)", fontSize: 12.5, color: "oklch(0.55 0.015 255)" }}>Click a dashed filament to walk back onto it — it becomes the live topic and jumps to the top of your feed.</div>}
       </div>
-    </>
-  );
+    );
+  })();
 
+  // ── Config slide-over ─────────────────────────────────────────────
   // Memoized so per-word transcript updates don't re-reconcile the config
   // panel while it's open. Handlers inside read live data via refs/setState
   // updaters; every state they render is in the dep list.
@@ -1119,7 +1423,7 @@ export default function App() {
         <div ref={splitRowRef} style={{ flex: "1 1 auto", minHeight: 0, display: "flex", gap: 18 }}>
           {/* Chat view = the assistant panel full-width: feed, chat AND PI —
               hiding the transcript, not the other two tabs. */}
-          {isChat ? sidebarCard : (
+          {isMap ? mapCard : isChat ? sidebarCard : (
             <>
               <div style={isSplit ? { flex: `0 0 ${pct}`, minWidth: 0, display: "flex" } : { flex: "1 1 auto", minWidth: 0, display: "flex" }}>{transcriptCard}</div>
               {isSplit && (
@@ -1135,7 +1439,6 @@ export default function App() {
         </div>
       </div>
       {slideOver}
-      {cmdConfirm}
     </div>
   );
 }

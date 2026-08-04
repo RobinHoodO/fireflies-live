@@ -1,0 +1,182 @@
+// EXPERIMENT — the conversation map.
+//
+// A meeting is a tree, not a line: every topic opens branches, you walk one,
+// and the others sit there unwalked. This models that tree so it can be drawn
+// live and walked back into.
+//
+//   active   — where the conversation is right now (the growing tip)
+//   explored — walked, then moved on from
+//   open     — surfaced but NOT taken: the path not taken, still available
+//   dropped  — was open, now clearly irrelevant (drawn faint, never deleted)
+//
+// Pure helpers only. The React state lives in App.tsx.
+
+export type GraphNodeState = "active" | "explored" | "open" | "dropped";
+export const GRAPH_STATES: GraphNodeState[] = ["active", "explored", "open", "dropped"];
+
+export type GraphNode = { id: number; label: string; parent: number | null; state: GraphNodeState; t: number };
+export type PlacedNode = GraphNode & { depth: number; x: number; y: number; angle: number };
+
+// Generous rings: each node carries a label hanging off it, and cramped rings
+// turn a readable colony into overlapping text.
+const RING = 260;
+const JITTER = 34;  // how far a node may wander off its ring
+
+// Deterministic pseudo-random in [0,1) from a node id. Mycelium is irregular,
+// but the irregularity must be STABLE — a node that reshuffles every render
+// reads as noise, not growth.
+function wobble(id: number, salt: number): number {
+  const h = Math.sin(id * 12.9898 + salt * 78.233) * 43758.5453;
+  return h - Math.floor(h);
+}
+
+// Same stable wobble, for the drawing layer (how far a filament bows sideways).
+export const wobbleOf = (id: number) => wobble(id, 3);
+
+// Radial hyphal layout: each node owns an angular wedge, its children split
+// that wedge in proportion to how much subtree hangs off each, and every node
+// sits one ring further out than its parent. Growth radiates outward from the
+// first topic the way a colony spreads from a spore.
+export function layoutMycelium(nodes: GraphNode[]): PlacedNode[] {
+  const byId = new Map(nodes.map(n => [n.id, n]));
+  const ordered = [...nodes].sort((a, b) => a.t - b.t || a.id - b.id);
+  const kids = new Map<number, GraphNode[]>();
+  const roots: GraphNode[] = [];
+  for (const n of ordered) {
+    // A parent that doesn't exist (or is the node itself) means "root" —
+    // the model will hand us dangling references eventually.
+    const parent = n.parent != null && n.parent !== n.id && byId.has(n.parent) ? n.parent : null;
+    if (parent == null) roots.push(n);
+    else kids.set(parent, [...(kids.get(parent) ?? []), n]);
+  }
+
+  // Subtree weight = leaf count, so a dense branch gets a wider wedge.
+  const weights = new Map<number, number>();
+  const weigh = (node: GraphNode, seen: Set<number>): number => {
+    if (seen.has(node.id)) return 1;
+    seen.add(node.id);
+    const children = kids.get(node.id) ?? [];
+    const w = children.length ? children.reduce((sum, c) => sum + weigh(c, seen), 0) : 1;
+    weights.set(node.id, w);
+    return w;
+  };
+  for (const root of roots) weigh(root, new Set());
+
+  const placed: PlacedNode[] = [];
+  const seen = new Set<number>(); // also the cycle guard
+  // One root sits at the origin like a spore. Several roots — separate threads
+  // of conversation — ring the centre instead, or they'd stack on one point.
+  const solo = roots.length === 1;
+  const rootRadius = solo ? 0 : RING * 0.62;
+
+  const walk = (node: GraphNode, depth: number, from: number, to: number) => {
+    if (seen.has(node.id)) return;
+    seen.add(node.id);
+    const angle = (from + to) / 2 + (wobble(node.id, 1) - 0.5) * (to - from) * 0.22;
+    const radius = depth === 0 ? rootRadius : depth * RING + (wobble(node.id, 2) - 0.5) * JITTER;
+    placed.push({ ...node, depth, angle, x: Math.cos(angle) * radius, y: Math.sin(angle) * radius });
+
+    const children = kids.get(node.id) ?? [];
+    if (!children.length) return;
+    // Children fan out around the direction this node already grew in, so a
+    // filament keeps travelling outward instead of doubling back on itself.
+    const total = children.reduce((sum, c) => sum + (weights.get(c.id) ?? 1), 0) || 1;
+    const full = depth === 0 && solo;
+    const spread = full ? Math.PI * 2 : Math.min(Math.PI * 0.85, (to - from) * 1.1);
+    let cursor = full ? 0 : angle - spread / 2;
+    for (const child of children) {
+      const share = ((weights.get(child.id) ?? 1) / total) * spread;
+      walk(child, depth + 1, cursor, cursor + share);
+      cursor += share;
+    }
+  };
+
+  const rootSpread = (Math.PI * 2) / Math.max(1, roots.length);
+  roots.forEach((root, i) => walk(root, 0, i * rootSpread, (i + 1) * rootSpread));
+
+  // Anything stranded by a cycle still gets drawn — losing a node silently
+  // would be worse than drawing it in the wrong place.
+  let stray = 0;
+  for (const node of ordered) {
+    if (seen.has(node.id)) continue;
+    seen.add(node.id);
+    const angle = stray++ * 0.9;
+    placed.push({ ...node, depth: 0, angle, x: Math.cos(angle) * RING, y: Math.sin(angle) * RING });
+  }
+  return placed;
+}
+
+// ONE tree, always. A conversation starts somewhere, and everything that
+// follows grew out of what came before — a floating island would be a lie about
+// how the meeting went. The earliest node is the trunk; anything the model
+// leaves parentless is grafted onto where the conversation actually was when it
+// came up (the live tip), falling back to the trunk.
+export function graftOrphans(nodes: GraphNode[], tipId: number | null = null): GraphNode[] {
+  if (nodes.length < 2) return nodes.map(n => n.parent == null ? n : { ...n, parent: null });
+  const byId = new Map(nodes.map(n => [n.id, n]));
+  const trunk = [...nodes].sort((a, b) => a.t - b.t || a.id - b.id)[0];
+
+  // Grafting a node onto its own descendant would close a loop.
+  const descendsFrom = (candidate: number, ancestorId: number) => {
+    const seen = new Set<number>();
+    let cursor: number | null = candidate;
+    while (cursor != null && !seen.has(cursor)) {
+      if (cursor === ancestorId) return true;
+      seen.add(cursor);
+      cursor = byId.get(cursor)?.parent ?? null;
+    }
+    return false;
+  };
+  const usable = (node: GraphNode, parentId: number | null): parentId is number =>
+    parentId != null && parentId !== node.id && byId.has(parentId) && !descendsFrom(parentId, node.id);
+
+  return nodes.map(node => {
+    if (node.id === trunk.id) return node.parent == null ? node : { ...node, parent: null };
+    if (usable(node, node.parent)) return node;
+    return { ...node, parent: usable(node, tipId) ? tipId : trunk.id };
+  });
+}
+
+// Break a label across lines instead of cutting it — a node whose title you
+// can't finish reading is a node you can't decide about.
+export function wrapLabel(text: string, maxChars = 20, maxLines = 3): string[] {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return [];
+  const lines: string[] = [];
+  let line = words[0];
+  for (let i = 1; i < words.length; i++) {
+    if ((line + " " + words[i]).length <= maxChars) { line += " " + words[i]; continue; }
+    lines.push(line);
+    if (lines.length === maxLines) { lines[maxLines - 1] += "…"; return lines; }
+    line = words[i];
+  }
+  lines.push(line);
+  return lines;
+}
+
+// Which topic was live when something surfaced. Feed items (asks, agenda
+// points, branches) hang off the node the conversation was standing on at the
+// time — that is what makes the map show HOW the thinking organised itself,
+// not just where the talk went. No extra model call: the timestamps already
+// know.
+export function hostNodeId(itemT: number, nodes: GraphNode[]): number | null {
+  if (!nodes.length) return null;
+  const ordered = [...nodes].sort((a, b) => a.t - b.t || a.id - b.id);
+  let host = ordered[0]; // anything older than the first topic belongs to it
+  for (const node of ordered) { if (node.t <= itemT) host = node; else break; }
+  return host.id;
+}
+
+// The walked route from the root to the tip — the "you are here" spine.
+export function pathToRoot(nodes: GraphNode[], fromId: number | null): number[] {
+  const byId = new Map(nodes.map(n => [n.id, n]));
+  const path: number[] = [];
+  const seen = new Set<number>();
+  let cursor = fromId;
+  while (cursor != null && byId.has(cursor) && !seen.has(cursor)) {
+    seen.add(cursor);
+    path.unshift(cursor);
+    cursor = byId.get(cursor)!.parent;
+  }
+  return path;
+}

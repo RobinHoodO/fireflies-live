@@ -1,3 +1,5 @@
+import { GRAPH_STATES, type GraphNodeState } from "./graph.ts";
+
 // Real backend wiring for the v2 interface (Phase 2).
 // Ported from the original src/App.tsx: key injection, Fireflies meetings + live
 // socket (with demo fallback), OpenRouter calls, suggestions, live answers, mode
@@ -151,7 +153,7 @@ export async function fetchSentiment(ctx: string, key: string, model: string): P
 }
 
 // A feed item to add (id:null), refine in place (id = existing item id), or mark done.
-export interface FeedUpdate { id: number | null; type?: FeedType; text: string; status?: "done"; outcome?: string }
+export interface FeedUpdate { id: number | null; type?: FeedType; text: string; status?: "done"; outcome?: string; live?: boolean }
 // `order` is the AI's priority ranking; null when it left priority unchanged (saves tokens).
 export interface FeedResult { items: FeedUpdate[]; order: number[] | null }
 
@@ -162,9 +164,9 @@ export interface FeedOpts { context: string; goal: string; bundleHint: string; m
 // and lets the model rank everything against everything.
 export async function fetchFeed(
   ctx: string, key: string, opts: FeedOpts, model: string,
-  existing: { id: number; type: FeedType; text: string; done?: boolean; votes: number; source: "ai" | "you" }[],
+  existing: { id: number; type: FeedType; text: string; done?: boolean; votes: number; source: "ai" | "you"; live?: boolean }[],
 ): Promise<FeedResult | null> {
-  const list = existing.slice(0, 24).map(item => ({ id: item.id, type: item.type, text: item.text, votes: item.votes, source: item.source, ...(item.done ? { done: true } : {}) }));
+  const list = existing.slice(0, 24).map(item => ({ id: item.id, type: item.type, text: item.text, votes: item.votes, source: item.source, ...(item.done ? { done: true } : {}), ...(item.live === false ? { live: false } : {}) }));
   const sys = `You are Robin's real-time meeting copilot. You maintain ONE priority-ordered live feed for the meeting.
 Item types:
 - "ask": a sharp question Robin could ask right now
@@ -176,12 +178,13 @@ Item types:
 - "branch": a promising conversation direction worth steering into` : ""}
 MEETING: ${opts.meetingTitle || "Meeting"}
 ROBIN'S GOAL: ${opts.goal || "Advance the meeting productively."}${opts.context ? `\nCONTEXT: ${opts.context}` : ""}${opts.bundleHint ? `\nBACKGROUND (Robin's resources):\n${opts.bundleHint}` : ""}
-Current feed as JSON, most important first: ${JSON.stringify(list)}
+Current feed as JSON, most important first ("live":false means it has already fallen out of the moment): ${JSON.stringify(list)}
 Items with "source":"you" were written by Robin himself — that is human intuition and outranks yours: never drop them, never reword them, and keep them high unless the transcript shows they are handled. "votes" is Robin's explicit priority signal. "done" items are already handled.
 Read the latest transcript, then return ONLY changes:
 - Refine an existing item in place with its SAME "id" and better "text" when newer context makes it sharper. Never emit a near-duplicate of an existing item.
 - FOLLOW-THROUGH: if the transcript shows an item was said, done, covered or made irrelevant, return its SAME "id" with "status":"done" and "outcome":"<how it landed, under 12 words>". Never mark done without transcript evidence.
 - Create a NEW item ("id":null) only for a genuinely new idea not already covered.${opts.agenda ? " When the feed has no agenda points yet, seed a few from Robin's goal and the background." : ""}
+- STILL LIVE? For open "ask", "clarify" and "branch" items only, judge whether it could still be raised naturally at THIS moment in the conversation. Return "live":false with its SAME "id" once the conversation has moved past it — the question is not wrong, just no longer of the moment. Return "live":true if a stale one becomes relevant again. Only send "live" when it CHANGES; a new item is assumed live.
 - Omit unchanged items entirely.
 - "order": the full priority ranking of ALL current ids, most important first. Rank by what most advances Robin's goal right now, then time-sensitivity. Include "order" ONLY when the priority actually changed — otherwise omit the key entirely. New items are not in "order" yet (they have no id until the app assigns one); they enter at the top and you rank them on your next pass, so re-rank promptly after adding.
 Each item: {"id":<existing id or null>,"type":"<type>","text":"<under 16 words>"}. A done update needs only "id", "status", "outcome".
@@ -198,9 +201,54 @@ Respond ONLY with {"items":[...]} (plus "order" when it changed). No prose, no m
         id: Number.isInteger(x.id) ? x.id : null,
         ...(FEED_TYPES.includes(x.type) ? { type: x.type as FeedType } : TYPE_MAP[x.type] ? { type: TYPE_MAP[x.type] } : {}),
         text: typeof x.text === "string" ? x.text : "",
+        ...(typeof x.live === "boolean" ? { live: x.live } : {}),
         ...(x.status === "done" ? { status: "done" as const, outcome: String(x.outcome ?? "") } : {}),
       }));
     return { items, order };
+  } catch { return null; }
+}
+
+// ── EXPERIMENT: conversation map ─────────────────────────────────
+// One slow call maintains the meeting as a TREE of topics — the route walked
+// plus the branches that opened and were never taken.
+export interface GraphUpdate { id: number | null; label: string; parent: number | null; state: GraphNodeState }
+export interface GraphResult { nodes: GraphUpdate[]; current: number | null }
+
+export async function fetchGraph(
+  ctx: string, key: string, goal: string, model: string,
+  existing: { id: number; label: string; parent: number | null; state: GraphNodeState }[],
+): Promise<GraphResult | null> {
+  const sys = `You map a live conversation as a TREE of topics. Not a summary — a map of where the conversation went and where it could still go.
+Each node is one topic, labelled in 2-6 words.
+"parent" is the topic this one grew out of. ONE tree only: exactly the very first topic of the meeting has "parent":null — everything after it grew out of something already on the map, so give it a real parent (the topic that was live when it came up, if nothing better fits). Never leave a second node parentless.
+"state":
+- "active": what is being discussed right now (exactly one node)
+- "explored": discussed, then moved on from
+- "open": a direction that surfaced but was NOT taken — a path still available
+- "dropped": was open, now clearly irrelevant
+${goal ? `ROBIN'S GOAL: ${goal}\nBranches that serve this goal matter most.\n` : ""}Current map as JSON: ${JSON.stringify(existing)}
+Read the latest transcript, then return ONLY changes:
+- A node whose state changed: its SAME "id" with the new "state". Give it a "parent" too if you now see which topic it grew out of — that is how a flat list becomes a tree. Only ever set a real parent; never send null to detach a node.
+- NEW nodes: give each a NEGATIVE temporary id (-1, -2, -3). You may use a temporary id as another new node's "parent", as long as the parent is listed FIRST. So you can add a topic and its branch in the same pass. Up to 4 new nodes per pass.
+- Mark a branch "open" the moment someone gestures at a direction the group does not follow — a question parked, an aside, a "we should also…", a topic raised and dropped. Those unwalked branches are the whole point of this map, so surface them generously.
+- Never delete a node. A topic that died becomes "dropped", not missing.
+- Omit unchanged nodes.
+- "current": the id of the "active" node ("current" may be a temporary id).
+Respond ONLY with {"nodes":[{"id":<id|-1|null>,"label":"...","parent":<id|-1|null>,"state":"..."}],"current":<id|null>}. No prose.`;
+  try {
+    const raw = await callAI([{ role: "system", content: sys }, { role: "user", content: `Transcript (latest last):\n${ctx}` }], key, model, 700);
+    const value = modelJsonObject(raw);
+    if (!value || !Array.isArray(value.nodes)) return null;
+    const nodes = value.nodes
+      .filter((n: any) => n && typeof n === "object" && (n.id === null || Number.isInteger(n.id)) && (n.parent === null || n.parent === undefined || Number.isInteger(n.parent)) && GRAPH_STATES.includes(n.state))
+      .slice(0, 8)
+      .map((n: any) => ({
+        id: Number.isInteger(n.id) ? n.id : null,
+        label: typeof n.label === "string" ? n.label.trim().slice(0, 60) : "",
+        parent: Number.isInteger(n.parent) ? n.parent : null,
+        state: n.state as GraphNodeState,
+      }));
+    return { nodes, current: Number.isInteger(value.current) ? value.current : null };
   } catch { return null; }
 }
 

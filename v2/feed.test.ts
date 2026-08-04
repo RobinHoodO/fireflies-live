@@ -1,7 +1,9 @@
 // Pins the feed priority blend: Robin's votes must always beat the AI's ranking.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { prioritize, applyOrder, sortFeed, matchesFilter, type FeedItem } from "./feed.ts";
+import { prioritize, applyOrder, sortFeed, matchesFilter, anchorFor, isOpenPossibility, FILTER_TYPES, type FeedItem } from "./feed.ts";
+import { FEED_TYPES } from "./backend.ts";
+import { type GraphNode } from "./graph.ts";
 
 const item = (id: number, over: Partial<FeedItem> = {}): FeedItem =>
   ({ id, type: "note", text: `item ${id}`, t: id, votes: 0, source: "ai", ...over });
@@ -40,10 +42,61 @@ test("priority sort is the array order; newest sort reorders by time", () => {
   assert.deepEqual(ids(sortFeed(items, "oldest")), [1, 2, 3]);
 });
 
-test("the agenda chip matches every agenda kind and nothing else", () => {
+test("the agenda chip covers points to cover — but not branches", () => {
   assert.ok(matchesFilter("topic", "agenda"));
   assert.ok(matchesFilter("clarify", "agenda"));
-  assert.ok(matchesFilter("branch", "agenda"));
+  assert.equal(matchesFilter("branch", "agenda"), false);
   assert.equal(matchesFilter("ask", "agenda"), false);
-  assert.ok(matchesFilter("ask", "ask"));
+});
+
+test("branch is its own chip", () => {
+  assert.ok(matchesFilter("branch", "branch"));
+  assert.equal(matchesFilter("topic", "branch"), false);
+});
+
+test("every feed type is reachable by exactly one chip", () => {
+  for (const type of FEED_TYPES) {
+    const chips = Object.keys(FILTER_TYPES).filter(f => matchesFilter(type, f));
+    assert.deepEqual(chips.length, 1, `${type} is covered by ${chips.length} chips: ${chips}`);
+  }
+});
+
+test("an unknown chip id matches nothing rather than everything", () => {
+  assert.equal(matchesFilter("ask", "nope"), false);
+});
+
+// ── possibility vs record ────────────────────────────────────────
+const gnode = (id: number, t: number): GraphNode => ({ id, label: `topic ${id}`, parent: id === 1 ? null : 1, state: "explored", t });
+const GRAPH = [gnode(1, 100), gnode(2, 200), gnode(3, 300)];
+
+test("an open ask travels with the conversation", () => {
+  const ask = item(9, { type: "ask", t: 150 });
+  assert.equal(anchorFor(ask, GRAPH, 3), 3);
+});
+
+test("once the moment has passed, the ask falls back to where it came up", () => {
+  const stale = item(9, { type: "ask", t: 150, live: false });
+  assert.equal(anchorFor(stale, GRAPH, 3), 1);
+});
+
+test("a note is history — it never moves, even while live-ish", () => {
+  assert.equal(anchorFor(item(9, { type: "note", t: 250 }), GRAPH, 3), 2);
+});
+
+test("a handled possibility becomes history too", () => {
+  assert.equal(anchorFor(item(9, { type: "ask", t: 150, status: "done" }), GRAPH, 3), 1);
+});
+
+test("with no tip, everything anchors to where it arose", () => {
+  assert.equal(anchorFor(item(9, { type: "ask", t: 250 }), GRAPH, null), 2);
+  assert.equal(anchorFor(item(9, { type: "ask", t: 250 }), GRAPH, 404), 2); // unknown tip
+});
+
+test("only asks, clarifies and branches are possibilities", () => {
+  assert.ok(isOpenPossibility(item(1, { type: "ask" })));
+  assert.ok(isOpenPossibility(item(2, { type: "clarify" })));
+  assert.ok(isOpenPossibility(item(3, { type: "branch" })));
+  assert.equal(isOpenPossibility(item(4, { type: "note" })), false);
+  assert.equal(isOpenPossibility(item(5, { type: "do" })), false);
+  assert.equal(isOpenPossibility(item(6, { type: "topic" })), false);
 });
