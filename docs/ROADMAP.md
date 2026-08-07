@@ -18,6 +18,7 @@ backend. Light, spacious, futuristic UI.
 | 🧠 **5** | Intelligence & polish | ⬜ later |
 | 🌐 **6** | Thrivbe OS integration | 🟡 **6.1 End & File shipped 2026-07-12** |
 | 🧭 **7** | Adaptive Navigator | ✅ **7.1–7.3 shipped 2026-07-12** (7.4 kernel-native ⬜) — design: [`ADAPTIVE-NAVIGATOR.md`](./ADAPTIVE-NAVIGATOR.md) |
+| 🕊️ **8** | Facilitation intelligence | ⬜ planned — sourced from the Max Semenchuk call, 2026-08-07 |
 
 ```
 before 📅 ──────── during 🔴 LIVE ──────── after 📝
@@ -73,6 +74,19 @@ research            │ FIREFLIES LIVE │──📁──▶ → Notion page
   sidebar strip with current-mood label + score + SVG sparkline (green/gray/red), wired to
   the existing Sentiment toggle; in Markdown export; reset per connection. Key-moments
   flag still inert.
+- ✅ 🩺 **2026-08-07 data-loss fix pass** — the meeting record was destroying more than it
+  kept. `FEED_CAP` 60 → 400 and `lines` 500 → 3000 (both were hard slices, and
+  `prioritize` sinks handled items to the bottom, so *done notes were deleted first* —
+  that's the "notes are disappearing" report); near-duplicate suppression (`isNearDupe`,
+  word-overlap, same-type only) since the AI rewords its own suggestions and each reword
+  claimed a slot; wrong-language ASR banner (`garbledSpeakers`). Measured on the Max
+  call: 53% of the words and three quarters of the suggestions were being thrown away.
+  Full analysis: [`postmortem-2026-08-07-max.md`](./postmortem-2026-08-07-max.md).
+- ✅ 🕸️ **2026-08-07 map fixes** — ring radius `230 · depth^0.72` instead of a flat 260px
+  per ring (a 20-deep conversation sat on a 5200px radius of empty space), and edges use
+  `pathLength={1}` so the grow-in dash matches the curve — the hardcoded
+  `strokeDasharray: 900` was rendering any longer filament as 900-on/900-off, which is
+  why lines looked disconnected on the outer rings.
 
 ## 🖥️ Phase 3 — Backend delegation bridge (🟡 MVP shipped, security-sensitive)
 
@@ -165,6 +179,126 @@ Twenty after). Weave, in order of leverage:
 - ⬜ 🏢 **7.4 Kernel-native** — retrieval + guidance via Thrivbe-1 kernel (private
   routing, full wiki text, Twenty/Notion enrichment). Merges with 6.2/6.3.
 
+## 🕊️ Phase 8 — Facilitation intelligence (⬜ planned)
+
+> From **goal-conditioned navigator** → **AI facilitator**. Phase 7 asks *am I
+> getting what I came for?* Phase 8 asks *is this conversation working, for
+> everyone in it?* — intentions, emotional arc, conflict patterns, and the
+> non-verbal layer.
+>
+> Sourced almost entirely from the Max Semenchuk call, **2026-08-07** — the
+> first hour of real user feedback on the product from someone building the
+> adjacent thing. Full transcript:
+> `content/meetings/transcripts/2026-08-07-robin-max-semenchuk-fireflies-full.md`.
+> Post-mortem on why the live system captured almost none of it:
+> [`postmortem-2026-08-07-max.md`](./postmortem-2026-08-07-max.md).
+
+Robin's framing in the call: *"a motivation for me is to have an AI facilitator
+that can always help a meeting… facilitation is a crucial skill, but it takes a
+lot of energy, and most people don't have that experience."* Max's constraint on
+the same idea: *"it can be a support system for thinking, but not delegate
+thinking to AI."*
+
+### 8.1 — Ready to build
+
+- ⬜ 🎭 **The three questions** — replace the generic post-meeting summary with
+  Max's own framework, which he uses on every meeting *because* it's cheap
+  enough to sustain: **What were the intentions of the parties? What was the
+  emotional arc? What is the metaphor for this meeting?** Then: how well were
+  those intentions served, per side. Direct product critique from him: *"your
+  fireflies… when it tries to give me a typical summary, well, it's not too bad
+  — but then it usually misunderstands the tasks. I haven't found a lot of help
+  with that."* Note what this replaces: Navigator gives phase/stance/risk and
+  sentiment gives a number; neither answers any of the three. Feeds the
+  meeting-analyser output too (6.1).
+- ⬜ 🙋 **Intentions panel — opening protocol, closed at the end.** Max's friend
+  opens every meeting with *state your intention, state your distractions* (so a
+  distracted participant reads as distracted, not demotivated). Max was
+  sceptical, then converted: *"How can you start a meeting without intentions?"*
+  Robin's variant needs no ceremony — the AI **infers and surfaces** background
+  intentions and unspoken assumptions from the transcript. Build both: captured
+  early, checked against at close.
+- ⬜ ⚠️ **Conflict-pattern detection → mediation nudge.** Max ran two real
+  conflict transcripts through analysis; both returned the same finding —
+  *both parties wanted the same thing, never made intentions visible, then spun
+  in circles.* His proposal: spot the pattern live and at the ~5–10 min mark
+  offer *"it looks like you might want to try another strategy."* Distinct from
+  the sentiment score — pattern-matching against known dialogue failure modes,
+  not a mood reading.
+- ⬜ 📮 **Pre-meeting prep, sent out.** Robin's extension of the facilitator
+  idea: the system mails participants their preparation beforehand. Max
+  independently described his own 100% mode as *prep → present → analyse* and
+  said he only pays that cost for crucial conversations because *"it's daunting
+  to try to do it every time."* **That is the positioning for the whole
+  product** — make 100% mode cheap enough for routine meetings.
+
+### 8.2 — Design constraints (from the same call)
+
+- ⬜ 🫥 **Solve the presence problem — the sharpest objection in the call.**
+  *"If there is a conversation happening and I keep track of this window, which
+  also works with a bit of delay, and I'm trying to see what's written in there —
+  I lose connection with the person in conversation."* That is a direct critique
+  of a live dashboard as a form factor. His fix is not to abandon it: make
+  delivery **non-intrusive** (*"could maybe send you just a personal message in
+  the chat, or just on your screen"*) and push heavy analysis async/post-call.
+  Re-examine the current UI's attention cost against this. Interacts with Phase
+  4 (side panel) and 8.4.
+- ⬜ 🤲 **Support thinking, never delegate it.** Standing constraint on every
+  Phase 8 feature — and *especially* never delegate relationship-building.
+- ⬜ ⚖️ **Neutrality is a hard requirement, and refusal is a real state.** Max
+  and his wife resolved a finance tension well by each laying their side out
+  through ChatGPT; days later he proposed an AI mediator for the same topic and
+  she flatly refused — *"I wasn't prepared to somebody say no to AI mediator."*
+  He also named the failure mode: a one-sided AI becomes an advocate and starts
+  using clinical language against the other party (*"you're abusing…"*). Any
+  mediation feature must be visibly neutral **and** degrade gracefully when a
+  participant wants no part of it.
+
+### 8.3 — The bigger bet: agent-to-agent mediation
+
+- ⬜ 🕊️ **Neutral mediator agent between two parties' agents.** Robin's design:
+  each party brings their own agent carrying full personal history; a neutral
+  mediator sits between them, able to search each side's context **in a sandbox,
+  wiped after the meeting**. Plus the private-channel move — the mediator DMs
+  one participant: *"two weeks ago you said this — might it be relevant now?"*
+- ⬜ 🔐 **ZK-style selective disclosure.** Max's sharpening: the bartender
+  doesn't need your passport, only *over 18*. The mediator requests one specific
+  fact, gets that user's explicit approval, and only that fact crosses. He also
+  named the actual gap: **there is no protocol for AI-to-AI context sharing
+  today** — a ChatGPT shared chat leaks everything from the moment you share it.
+  Greenfield; possibly the most interesting thing in the call.
+
+### 8.4 — Beyond text: the non-verbal layer
+
+- ⬜ 🕺 **Movements / body language.** Robin's theatre ratio — ~5% words, 10–15%
+  tone, the rest body. Max's demo (built on Maha's art-of-dialogue framework)
+  segments a video into chunks by dominating **movement** — speaking from above,
+  horizontally, the "snail" — with ElevenLabs emotion recognition on his list.
+  Ties into Phase 5's voice-analysis item and Phase 4's tab-audio capture.
+- 🔵 **Encouraging finding:** his system is **transcript-only today**, and from
+  an hour of rich context it reliably detected that people were arguing —
+  without audio. More is recoverable from text than assumed; don't block 8.4 on
+  audio/video capture.
+- ⬜ 🎲 **The calibration game — a pattern worth stealing wholesale.** His demo
+  doesn't assert. *You* guess the movement, the AI guesses, you compare, it gives
+  its rationale: *"it's more like a provocation… not you're wrong, AI is right."*
+  It trains the human's attentiveness while generating labels for a framework
+  that has none (Maha's ~16 movements have no reference document and no labelled
+  corpus; his plan is 2-of-3 or 3-of-5 human agreement as ground truth). The AI
+  is the **"fly on the wall"** point of view, offered for comparison rather than
+  authority. Applies straight to the feed: *a suggestion offered as one read to
+  compare against your instinct* is a different product from one asserting what
+  to say next — and it is the version that survives the "don't outsource
+  cognition" objection in 8.2.
+
+### 8.5 — Meeting type / mode
+
+- ⬜ 🏷️ **Pick a check-in type before the feed starts generating.** The
+  2026-08-07 call ran the entire hour in sales-discovery mode against a friend —
+  26 of 60 saved items were near-identical *"position Robin as…"* branches on a
+  peer catch-up. Whatever goal/context was set, the mode was wrong. Phase 7's
+  goal card conditions the *content*; this conditions the *register*.
+
 ---
 
 ## 🧾 Known follow-ups / tech debt
@@ -177,3 +311,13 @@ Twenty after). Weave, in order of leverage:
 - 🙋 Question mode assumes "other speakers ask the host"; no true host identification yet.
 - 🐢 Demo mode stream freezes in background tabs (Chrome timer throttling) — cosmetic,
   the real socket is event-driven and unaffected.
+- 🗣️ **Fireflies realtime locks a speaker to the wrong language.** On 2026-08-07 Robin's
+  entire side streamed as Ukrainian/Russian fragments (264 garbage words) while Max
+  streamed clean; the *final* transcript had Robin in English (1616 words), so the defect
+  leaves no trace after the call. The copilot therefore advised on half a conversation for
+  an hour. We can only warn (`garbledSpeakers` banner) — **open question: can the
+  Fireflies workspace/bot be pinned to English?** Their post-call pass clearly gets it
+  right. Never validate live-transcription quality against the post-call transcript;
+  they are different systems.
+- 💾 The meeting record is written once, at export — a mid-call crash still loses the
+  meeting. The caps no longer do (2026-08-07), but the write is still a single point.

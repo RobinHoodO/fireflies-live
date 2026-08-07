@@ -32,6 +32,49 @@ export function applyOrder(items: FeedItem[], order: number[]) {
   return [...ranked, ...items.filter(x => !seen.has(x.id))];
 }
 
+// The AI paraphrases its own live suggestions constantly — "map ZK model to
+// Robin" and "map ZK-proof model to Robin" arrive minutes apart as separate
+// items. Exact-match dedupe never catches those, and each paraphrase costs a
+// feed slot, which is how a real note gets pushed off the end. Word overlap
+// against the shorter item (containment, so a restatement with extra preamble
+// still matches) is enough; same type only, since a Note recording what was
+// said is not the Ask that prompted it.
+// ponytail: bag-of-words, no stemming — 0.6 was tuned against the 2026-08-07
+// Max feed (8/60 dropped, all genuine). Reach for embeddings only if it misses.
+const feedWords = (s: string) => new Set(s.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []);
+
+export function isNearDupe(text: string, type: FeedType, items: FeedItem[], threshold = 0.6) {
+  const a = feedWords(text);
+  if (!a.size) return false;
+  return items.some(item => {
+    if (item.type !== type) return false;
+    const b = feedWords(item.text);
+    if (!b.size) return false;
+    let shared = 0;
+    for (const w of a) if (b.has(w)) shared++;
+    return shared / Math.min(a.size, b.size) >= threshold;
+  });
+}
+
+// Fireflies' realtime ASR auto-detects language per chunk and can lock a
+// speaker to the wrong one. On 2026-08-07 Robin's entire side came through as
+// Cyrillic fragments — 264 garbage words where the final transcript had 1616
+// of English — so the copilot spent an hour advising on a one-sided
+// conversation and re-asking questions Robin had already asked. Nothing
+// client-side can fix the stream; the fix is to say so, loudly, while there is
+// still time to restart the bot.
+export function garbledSpeakers(lines: { speaker: string; text: string }[], minLines = 6) {
+  const stats = new Map<string, { lines: number; bad: number }>();
+  for (const l of lines) {
+    const s = stats.get(l.speaker) ?? { lines: 0, bad: 0 };
+    s.lines++;
+    // Non-Latin script where the rest of the call is Latin = wrong language lock.
+    if (/[\p{sc=Cyrillic}\p{sc=Greek}\p{sc=Arabic}\p{sc=Hebrew}]/u.test(l.text)) s.bad++;
+    stats.set(l.speaker, s);
+  }
+  return [...stats].filter(([, s]) => s.lines >= minLines && s.bad / s.lines >= 0.3).map(([speaker]) => speaker);
+}
+
 export function sortFeed(items: FeedItem[], sort: FeedSort) {
   if (sort === "priority") return items; // already in priority order
   return [...items].sort((a, b) => {

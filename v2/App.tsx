@@ -18,7 +18,7 @@ import {
   type Meeting, type ConnStatus, type NavFrame, type SentimentPoint, type Constellation, type FeedType, type FeedResult,
 } from "./backend";
 import { packSession, unpackSession, shouldAutoResume } from "./session";
-import { prioritize, applyOrder, sortFeed, matchesFilter, anchorFor, isOpenPossibility, POSSIBILITY_TYPES, FEED_SORTS, type FeedItem, type FeedSort } from "./feed";
+import { prioritize, applyOrder, sortFeed, matchesFilter, anchorFor, isOpenPossibility, isNearDupe, garbledSpeakers, POSSIBILITY_TYPES, FEED_SORTS, type FeedItem, type FeedSort } from "./feed";
 import { layoutMycelium, pathToRoot, graftOrphans, wrapLabel, hostNodeId, wobbleOf, GRAPH_STATES, type GraphNode } from "./graph";
 
 // Persisted UI config — survives reloads / new sessions (localStorage).
@@ -38,7 +38,15 @@ const GREETING_PI: Message = { id: 0, role: "agent", text: "● **Command interf
 type Line = { speaker: string; text: string; isFinal: boolean; id: string };
 
 const SETTINGS_FLAGS = [...FLAGS, { k: "agenda", l: "Dynamic agenda" }, { k: "graph", l: "Conversation map (experiment)" }];
-const FEED_CAP = 60;
+// Both caps are runaway backstops, NOT working limits. They used to be 60 and
+// 500, which a one-hour call blows through in ~15 minutes — the 2026-08-07 Max
+// meeting ended holding exactly 60 feed items spanning the last 16 minutes and
+// a transcript starting at 31:03 of 59:04, so 53% of the words and three
+// quarters of the suggestions were destroyed rather than scrolled. The AI only
+// ever sees the top 24 items and the transcript only feeds off the tail, so
+// nothing downstream needed these to be small; they only bounded the record.
+const FEED_CAP = 400;
+const LINES_CAP = 3000;
 // Say-this steadiness: a fresh draft every few seconds reads as jumpy and
 // untrustworthy, so redraft slowly and only on the counterpart's turn.
 const SAY_MIN_GAP_MS = 25_000;
@@ -133,7 +141,7 @@ export default function App() {
   const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(() => SESSION.selectedMeeting && typeof SESSION.selectedMeeting === "object" && typeof SESSION.selectedMeeting.id === "string" ? SESSION.selectedMeeting : null);
   const [loadingMeetings, setLoadingMeetings] = useState(false);
   const [meetingsError, setMeetingsError] = useState("");
-  const [lines, setLines] = useState<Line[]>(() => Array.isArray(SESSION.lines) ? SESSION.lines.filter((l: any) => l && typeof l.speaker === "string" && typeof l.text === "string" && typeof l.id === "string").slice(-500) : []);
+  const [lines, setLines] = useState<Line[]>(() => Array.isArray(SESSION.lines) ? SESSION.lines.filter((l: any) => l && typeof l.speaker === "string" && typeof l.text === "string" && typeof l.id === "string").slice(-LINES_CAP) : []);
   const [liveAnswer, setLiveAnswer] = useState("");
   const [scriptPointer, setScriptPointer] = useState(0);
   const [missStreak, setMissStreak] = useState(0);
@@ -297,7 +305,9 @@ export default function App() {
         }
       }
       if (it.status === "done" || !it.text) continue;
-      if (next.some(x => x.text.toLowerCase() === it.text.toLowerCase())) continue; // skip exact dupe
+      // Restatements, not just exact repeats — the AI rewords its own live
+      // suggestions every few pulses and each reword used to claim a slot.
+      if (isNearDupe(it.text, it.type ?? "note", next)) continue;
       // New items enter at the top of their vote band — the AI can't rank an item
       // it hasn't seen an id for, so it re-seats them on the next pulse.
       next.unshift({ id: sidRef.current++, type: it.type ?? "note", text: it.text, t: Date.now(), votes: 0, source: "ai" });
@@ -544,7 +554,7 @@ export default function App() {
   const onTranscriptLine = (speaker: string, text: string, isFinal: boolean, key?: string) => {
     // Cap retained lines at 500 (mirrors the restore-path cap) so late-meeting
     // renders don't pay an ever-growing reduce + DOM diff.
-    const cap = (next: Line[]) => next.length > 500 ? next.slice(-500) : next;
+    const cap = (next: Line[]) => next.length > LINES_CAP ? next.slice(-LINES_CAP) : next;
     setLines(prev => {
       if (key != null) {
         const idx = prev.findIndex(l => l.id === key);
@@ -794,6 +804,8 @@ export default function App() {
   const isSplit = view === "split", isChat = view === "chat", isMap = view === "map";
   const isConnected = status === "connected", isConnecting = status === "connecting", isIdle = status === "idle";
   const hasTranscript = grouped.length > 0;
+  // Wrong-language lock on one speaker silently halves the copilot's input.
+  const garbled = useMemo(() => garbledSpeakers(grouped), [grouped]);
   const statusColor = isConnected ? "oklch(0.68 0.16 155)" : isConnecting ? "oklch(0.78 0.14 75)" : "oklch(0.7 0.01 250)";
   const statusLabel = isConnected ? "Connected" : isConnecting ? "Connecting…" : "Idle";
   const pct = Math.round(splitRatio * 1000) / 10 + "%";
@@ -935,6 +947,11 @@ export default function App() {
   // pulse, copied/filed flips) doesn't re-reconcile up to 500 line nodes.
   const transcriptList = useMemo(() => (
     <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+      {garbled.length > 0 && (
+        <div style={{ padding: "10px 12px", borderRadius: 10, background: "oklch(0.96 0.05 75)", border: "1px solid oklch(0.82 0.12 75)", fontSize: 13, lineHeight: 1.5, color: "oklch(0.38 0.09 60)" }}>
+          ⚠ Fireflies is transcribing <b>{garbled.join(", ")}</b> in the wrong language — every suggestion below is built on a one-sided conversation. Restart the bot or set the meeting language to English.
+        </div>
+      )}
       {grouped.map(l => (
         <div key={l.id}>
           <div style={{ fontSize: 12.5, fontWeight: 700, letterSpacing: "0.01em", marginBottom: 5, color: speakerColor(l.speaker) }}>{l.speaker}</div>
@@ -945,7 +962,7 @@ export default function App() {
         ? <div style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 4, color: "oklch(0.7 0.012 255)", fontSize: 13 }}><span style={{ width: 7, height: 16, background: "var(--ac)", borderRadius: 2, animation: "fl-blink 1.1s steps(1) infinite", display: "inline-block" }} /><span>Listening…</span></div>
         : <div style={{ fontSize: 13, color: "oklch(0.6 0.015 255)", paddingTop: 4 }}>Restored from your last session — connect to continue.</div>}
     </div>
-  ), [grouped, isConnected]);
+  ), [grouped, isConnected, garbled]);
 
   const transcriptCard = (
     <div style={{ ...cardBase, flex: "1 1 auto", minWidth: 0 }}>
@@ -1265,11 +1282,17 @@ export default function App() {
                   const bow = (wobbleOf(p.id) - 0.5) * 60;
                   const nx = -(p.y - parent.y), ny = p.x - parent.x;
                   const len = Math.hypot(nx, ny) || 1;
+                  // The grow-in dash was a hardcoded 900 user units, so any
+                  // filament longer than that rendered 900 on / 900 off — a
+                  // line with a hole in it, on exactly the long outer edges
+                  // where the map is hardest to read. pathLength normalises the
+                  // dash to whatever the curve actually measures.
                   return <path key={`e${p.id}`} className="fl-hypha"
                     d={`M${parent.x},${parent.y} Q${mx + (nx / len) * bow},${my + (ny / len) * bow} ${p.x},${p.y}`}
                     fill="none" stroke={onSpine ? "var(--ac)" : s.hypha} strokeWidth={onSpine ? 2.6 : 1.6} strokeLinecap="round"
-                    strokeDasharray={s.dashed ? "6 5" : undefined}
-                    style={s.dashed ? undefined : { ["--len" as string]: 900, strokeDasharray: 900 }} />;
+                    {...(s.dashed
+                      ? { strokeDasharray: "6 5" }
+                      : { pathLength: 1, strokeDasharray: 1, style: { ["--len" as string]: 1 } })} />;
                 })}
                 {/* Feed items: a thin tether to the topic they came up under. */}
                 {satellites.map(({ item, host, origin, open, x, y, flip }) => {

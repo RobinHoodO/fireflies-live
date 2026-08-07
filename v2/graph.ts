@@ -19,8 +19,20 @@ export type PlacedNode = GraphNode & { depth: number; x: number; y: number; angl
 
 // Generous rings: each node carries a label hanging off it, and cramped rings
 // turn a readable colony into overlapping text.
-const RING = 260;
+const RING = 230;
 const JITTER = 34;  // how far a node may wander off its ring
+
+// Ring spacing compresses as the colony deepens. Rings used to be evenly
+// spaced, which is fine for a five-topic meeting and absurd for a real one: the
+// 2026-08-07 Max call nested 20 deep, so the outermost ring sat at a 5200px
+// radius made almost entirely of empty space, and the tangential gaps out there
+// were long enough to snap the filaments drawn across them. Circumference grows
+// with depth anyway, so the outer rings never needed the same radial room.
+// ponytail: one exponent, no per-ring measurement — 0.72 keeps ~70px between
+// the outermost rings at depth 20 while pulling the whole map back into a
+// screenful. Retune the constant if labels start colliding; don't add a solver.
+const RING_FALLOFF = 0.72;
+const ringRadius = (depth: number) => RING * Math.pow(depth, RING_FALLOFF);
 
 // Deterministic pseudo-random in [0,1) from a node id. Mycelium is irregular,
 // but the irregularity must be STABLE — a node that reshuffles every render
@@ -73,7 +85,7 @@ export function layoutMycelium(nodes: GraphNode[]): PlacedNode[] {
     if (seen.has(node.id)) return;
     seen.add(node.id);
     const angle = (from + to) / 2 + (wobble(node.id, 1) - 0.5) * (to - from) * 0.22;
-    const radius = depth === 0 ? rootRadius : depth * RING + (wobble(node.id, 2) - 0.5) * JITTER;
+    const radius = depth === 0 ? rootRadius : ringRadius(depth) + (wobble(node.id, 2) - 0.5) * JITTER;
     placed.push({ ...node, depth, angle, x: Math.cos(angle) * radius, y: Math.sin(angle) * radius });
 
     const children = kids.get(node.id) ?? [];

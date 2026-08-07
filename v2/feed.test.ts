@@ -1,7 +1,7 @@
 // Pins the feed priority blend: Robin's votes must always beat the AI's ranking.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { prioritize, applyOrder, sortFeed, matchesFilter, anchorFor, isOpenPossibility, FILTER_TYPES, type FeedItem } from "./feed.ts";
+import { prioritize, applyOrder, sortFeed, matchesFilter, anchorFor, isOpenPossibility, isNearDupe, garbledSpeakers, FILTER_TYPES, type FeedItem } from "./feed.ts";
 import { FEED_TYPES } from "./backend.ts";
 import { type GraphNode } from "./graph.ts";
 
@@ -99,4 +99,51 @@ test("only asks, clarifies and branches are possibilities", () => {
   assert.equal(isOpenPossibility(item(4, { type: "note" })), false);
   assert.equal(isOpenPossibility(item(5, { type: "do" })), false);
   assert.equal(isOpenPossibility(item(6, { type: "topic" })), false);
+});
+
+// ── near-duplicate suppression ──────────────────────────────────────
+// Real pairs from the 2026-08-07 Max call, where reworded restatements ate
+// enough of the feed to push genuine notes off the end of the cap.
+test("a reworded restatement of the same ask is a dupe", () => {
+  const existing = [item(1, { type: "ask", text: "Max: in routine meetings, which phase drains most—prep framing, staying present, or post-analysis?" })];
+  assert.equal(isNearDupe("Max: which drains most—prep framing, staying present, or post-analysis?", "ask", existing), true);
+});
+
+test("a genuinely different ask survives", () => {
+  const existing = [item(1, { type: "ask", text: "Max: in routine meetings, which phase drains most—prep framing, staying present, or post-analysis?" })];
+  assert.equal(isNearDupe("Max: would Robin sandbox and audit skills before touching transaction data?", "ask", existing), false);
+});
+
+// A Note recording what was said is not the Ask that prompted it, even when
+// they share most of their words — losing the record was the original bug.
+test("a note is never deduped against a similarly worded ask", () => {
+  const existing = [item(1, { type: "ask", text: "Max: for routine work meetings—would async personal notes (not real-time) feel less intrusive than live mediation?" })];
+  assert.equal(isNearDupe("Max open to async personal notes (not real-time)—less intrusive, clearer than live mediation.", "note", existing), false);
+});
+
+test("empty text is never a dupe", () => {
+  assert.equal(isNearDupe("", "note", [item(1, { text: "anything" })]), false);
+});
+
+// ── wrong-language ASR detection ────────────────────────────────────
+// Fireflies' realtime stream locked Robin to Cyrillic for a whole hour while
+// transcribing Max fine, so the copilot advised on half a conversation.
+test("a speaker locked to the wrong script is flagged, the others are not", () => {
+  const lines = [
+    ...Array.from({ length: 8 }, () => ({ speaker: "Robin", text: "Я. Ее. Експеримент." })),
+    ...Array.from({ length: 8 }, () => ({ speaker: "Max", text: "Yeah, somehow I speak in English." })),
+  ];
+  assert.deepEqual(garbledSpeakers(lines), ["Robin"]);
+});
+
+test("a stray foreign phrase in an otherwise clean speaker is not flagged", () => {
+  const lines = [
+    { speaker: "Robin", text: "Так, exactly." },
+    ...Array.from({ length: 9 }, () => ({ speaker: "Robin", text: "That is what I meant." })),
+  ];
+  assert.deepEqual(garbledSpeakers(lines), []);
+});
+
+test("too few lines to judge yet — stay quiet", () => {
+  assert.deepEqual(garbledSpeakers([{ speaker: "Robin", text: "Я. Ее." }, { speaker: "Robin", text: "Аа. А." }]), []);
 });
