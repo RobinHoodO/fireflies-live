@@ -5,6 +5,7 @@ OnFailure=os-ping-fail@%n.service
 
 [Service]
 WorkingDirectory=/opt/Thrivbe-AI/lab/fireflies-live
+Environment=NODE_ENV=production
 Environment=SERVE_PORT=3017
 Environment=SERVE_HOST=127.0.0.1
 Environment=SERVE_HOSTS=hetzner.tail9908c7.ts.net:8453,localhost:3017,127.0.0.1:3017
