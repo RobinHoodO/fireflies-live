@@ -1,7 +1,7 @@
 // Pins the feed priority blend: Robin's votes must always beat the AI's ranking.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { prioritize, applyOrder, sortFeed, matchesFilter, anchorFor, isOpenPossibility, isNearDupe, garbledSpeakers, FILTER_TYPES, type FeedItem } from "./feed.ts";
+import { prioritize, applyOrder, sortFeed, matchesFilter, anchorFor, isOpenPossibility, isNearDupe, garbledSpeakers, transcriptContext, FILTER_TYPES, type FeedItem } from "./feed.ts";
 import { FEED_TYPES } from "./backend.ts";
 import { type GraphNode } from "./graph.ts";
 
@@ -146,4 +146,43 @@ test("a stray foreign phrase in an otherwise clean speaker is not flagged", () =
 
 test("too few lines to judge yet — stay quiet", () => {
   assert.deepEqual(garbledSpeakers([{ speaker: "Robin", text: "Я. Ее." }, { speaker: "Robin", text: "Аа. А." }]), []);
+});
+
+// ── the garbled side never reaches a model ──────────────────────────
+// Real lines from the 2026-08-07 call. The banner warned Robin; this is what
+// stops the copilot itself from advising on Cyrillic noise.
+const badCall = [
+  ...Array.from({ length: 8 }, () => ({ speaker: "Robin Sverd", text: "Я. Мм. На дачу. Майн Змі. Вид, вид, технології." })),
+  ...Array.from({ length: 8 }, () => ({ speaker: "Max Semenchuk", text: "Yeah, somehow I speak in English and you speak in Ukrainian even." })),
+];
+
+test("a garbled speaker's lines are dropped from the model context", () => {
+  const ctx = transcriptContext(badCall, 40);
+  assert.equal(/[\p{sc=Cyrillic}]/u.test(ctx), false);
+  assert.match(ctx, /^\[TRANSCRIPTION FAILING\]: Robin Sverd is talking/);
+  assert.equal(ctx.split("\n").filter(l => l.startsWith("[Max Semenchuk]")).length, 8);
+});
+
+test("dropping the garbled side does not shrink the window", () => {
+  // Naive slice-then-filter would have left 0 usable lines here: the last 8 of
+  // the transcript are all Robin's.
+  const ctx = transcriptContext([...badCall.slice(8), ...badCall.slice(0, 8)], 8);
+  assert.equal(ctx.split("\n").filter(l => l.startsWith("[Max Semenchuk]")).length, 8);
+});
+
+test("the whole room garbled (2026-07-31) leaves the header alone, not noise", () => {
+  const bothBad = [
+    ...Array.from({ length: 8 }, () => ({ speaker: "Robin Sverd", text: "Окей. Ее я. В мене чек монтар." })),
+    ...Array.from({ length: 8 }, () => ({ speaker: "Max Semenchuk", text: "Мослі. Отже. За Лайк." })),
+  ];
+  const ctx = transcriptContext(bothBad, 40);
+  assert.equal(/[\p{sc=Cyrillic}]/u.test(ctx), false);
+  assert.match(ctx, /Robin Sverd, Max Semenchuk are talking/);
+  assert.equal(ctx.includes("\n"), false); // header only — no dangling blank body
+});
+
+test("a clean call gets a plain transcript, no header", () => {
+  const ctx = transcriptContext(badCall.slice(8), 40);
+  assert.equal(ctx.includes("TRANSCRIPTION FAILING"), false);
+  assert.match(ctx, /^\[Max Semenchuk\]: Yeah, somehow/);
 });

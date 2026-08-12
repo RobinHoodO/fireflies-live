@@ -9,6 +9,7 @@ export const C = {
 };
 
 export const MODES = [
+  { id: "neutral", l: "Neutral conversation" }, { id: "facilitation", l: "Facilitation" },
   { id: "sales", l: "Sales call" }, { id: "interview", l: "Interview" }, { id: "standup", l: "Standup" },
   { id: "negotiation", l: "Negotiation" }, { id: "oneone", l: "1:1" }, { id: "discovery", l: "Discovery" },
 ];
@@ -53,8 +54,8 @@ export const FAST_MODELS = [
 ];
 
 export const FLAGS = [
-  { k: "autosuggest", l: "Auto-suggest" }, { k: "sentiment", l: "Sentiment" }, { k: "actions", l: "Action items" },
-  { k: "summary", l: "Live summary" }, { k: "speakers", l: "Speaker labels" }, { k: "profanity", l: "Profanity filter" },
+  { k: "autosuggest", l: "Auto-suggest" }, { k: "sentiment", l: "Sentiment" },
+  { k: "actions", l: "AI command suggestions" }, { k: "speakers", l: "Speaker labels" },
 ];
 
 export const VIEWS = [

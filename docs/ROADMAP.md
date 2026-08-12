@@ -129,11 +129,12 @@ already running on Thrivbe-1 (research before → ??? during → meeting-analyse
 Twenty after). Weave, in order of leverage:
 
 - ✅ 📁 **6.1 End & File** *(2026-07-12)* — the 📂 File button (and auto-file on ⏹ Stop)
-  writes the full meeting record via a locked-down bridge `POST /file` endpoint into
+  writes the full meeting record via the same-origin meeting-store API into
   `~/Thrivbe-AI/content/meetings/transcripts/`, where the existing **meeting-analyser**
   skill ingests it unchanged (analysis → Notion meeting page → decisions + tasks).
-  Fixed server-side destination, sanitized slugs (path traversal impossible), collision
-  suffixes, size cap, audit-logged, token-authed. Zero new infra. 🎉
+  Fixed server-side destination, sanitized slugs, collision suffixes, size cap, fsynced
+  append-only 30s checkpoints, atomic final publication, and interrupted-session recovery.
+  Zero new infra. 🎉
 - ⬜ 🧠 **6.2 Command → kernel delegation** — replace local `pi` spawn with a POST to the
   thrivbe-os kernel on Thrivbe-1 (voice-bridge pattern: confirmation gate + tool manifest).
   Mid-meeting "do" / "command" suggestions land in **🌸 Bloom** as tracked tasks and execute
@@ -308,16 +309,25 @@ thinking to AI."*
 - 🔑 Vite dev server reads `OPENROUTER_API` / `FIREFLY_API_KEY` from `~/Thrivbe-AI/.env`
   via a dev middleware; needs a real config story for non-dev deploys (→ Phase 6.3).
   Note: `FIREFLY_API_KEY` is actually the **Fireflies.ai** token, mislabeled.
-- 🙋 Question mode assumes "other speakers ask the host"; no true host identification yet.
+- ✅ 🙋 **Explicit host identity + meeting type** *(2026-08-12)* — settings persist the
+  exact host speaker label and a deliberately chosen meeting type; neutral conversation
+  is the default, and sentiment/navigation prompts exclude the configured host.
 - 🐢 Demo mode stream freezes in background tabs (Chrome timer throttling) — cosmetic,
   the real socket is event-driven and unaffected.
-- 🗣️ **Fireflies realtime locks a speaker to the wrong language.** On 2026-08-07 Robin's
-  entire side streamed as Ukrainian/Russian fragments (264 garbage words) while Max
-  streamed clean; the *final* transcript had Robin in English (1616 words), so the defect
-  leaves no trace after the call. The copilot therefore advised on half a conversation for
-  an hour. We can only warn (`garbledSpeakers` banner) — **open question: can the
-  Fireflies workspace/bot be pinned to English?** Their post-call pass clearly gets it
-  right. Never validate live-transcription quality against the post-call transcript;
-  they are different systems.
-- 💾 The meeting record is written once, at export — a mid-call crash still loses the
-  meeting. The caps no longer do (2026-08-07), but the write is still a single point.
+- 🗣️ **Fireflies realtime transcribes in the wrong language — upstream, unfixable here.**
+  On 2026-08-07 Robin's entire side streamed as Ukrainian fragments (264 garbage words)
+  while Max streamed clean; on 2026-07-31 *both* speakers did. The *final* transcript is
+  clean every time, so the defect leaves no trace after the call. **Answered 2026-08-08:**
+  the account language is already pinned to `English (Global)` at both Personal and Team
+  scope, and the realtime socket has no language parameter at all (auth is
+  `{token, transcriptId}`; the broadcast payload carries no language field). Fireflies'
+  realtime beta ignores the pinned language. Our side now quarantines garbled speakers out
+  of every model context (`transcriptContext`) instead of only warning, and
+  `node server/langcheck.mjs` diffs live vs final and exits 1 on a hidden fault. Never
+  validate live-transcription quality against the post-call transcript — different systems.
+  Full detail: `docs/postmortem-2026-08-07-max.md`.
+- ✅ 💾 **Interrupted-session recovery** *(2026-08-12)* — the server now keeps append-only
+  periodic checkpoints and the idle UI can recover the latest complete checkpoint into an
+  atomic final record. Terminal-only compaction/retention is configurable and ships with a
+  dry-run cleanup command; interrupted sessions are never deleted by lifecycle cleanup.
+  **Decision 2026-08-12:** completed session records use a 90-day retention policy.

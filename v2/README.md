@@ -1,43 +1,21 @@
-# Fireflies Live — v2
+# Fireflies Live client
 
-The redesigned interface (Phase 1, rebuilt from scratch against the design handoff in
-`docs/design/`) **wired to the real backend** (Phase 2). The design is unchanged; the
-mock content was removed and replaced with live data.
+The active React interface. `AuthBoundary.tsx` establishes the Robin-only HttpOnly session before `App.tsx` mounts; `backend.ts` talks only to same-origin `/api/*` routes. No provider credential or broad bridge token enters browser state.
 
-- **Fireflies** active-meeting detection + live transcription socket (`backend.ts`),
-  with a scripted demo fallback when no API key / meeting is set.
-- **OpenRouter** for live suggestions, the question-mode "Say this" answer, the chat
-  assistant, and "Suggest agent mode from meeting".
-- **Localhost command bridge** (`../server/bridge.mjs`) for the Terminal tab.
-- **Meeting filing** writes to `~/Thrivbe-AI/content/meetings/transcripts/` for the meeting-analyser pipeline.
-- Keys are injected by the dev server from `/Users/robinsverd/Thrivbe-AI/.env`
-  (`FIREFLY_API_KEY`, `OPENROUTER_API`) via `/api/fireflies-key` — never in client code.
+`App.tsx` owns the live meeting experience and durable checkpoint schedule. Meeting setup explicitly records the host speaker label, meeting type, goal, and optional context. The neutral meeting type is the default. The calm surface is intentionally allowed to remain silent and shows at most one cue Robin wrote or promoted.
 
-## Run it
-```bash
-npx vite --config v2/vite.config.ts        # dev  → http://localhost:5173 (boots the bridge too)
-npx vite build --config v2/vite.config.ts  # build
-```
+Feature switches correspond to implemented behavior:
 
-## Files
-- `App.tsx` — the whole interface (header, transcript, tabbed sidebar, chat view, config slide-over).
-- `backend.ts` — Fireflies meetings/socket, OpenRouter calls, suggestions, live answers, mode proposal.
-- `data.ts` — static design config + ported style helpers (no mock content).
-- `md.ts` — Markdown→HTML for agent bubbles (ported from the source).
-- `icons.tsx` — the lucide icon sprite.
-- `styles.css` — fonts, keyframes, scrollbar, hover/focus affordances.
-- `vite.config.ts` — standalone config: key injection + bridge boot + `/bridge` proxy.
+- auto-suggest, dynamic agenda, sentiment, conversation map, and speaker labels;
+- AI command suggestions, off by default, which only stage reviewed commands;
+- calm cue, which never promotes an unreviewed AI/navigation instruction by itself.
 
-## What's faithful to the handoff
-- Card-based shell, 1660px frame, 28px page inset, header card.
-- View modes: Transcript / Split (drag divider, clamp 0.34–0.74) / Chat (820px column).
-- **Tabbed** sidebar (Live feed · Chat · Terminal) — the chosen direction.
-- Config summary row → right-side **slide-over** (agent mode, model picker, feature switches).
-- Question-mode "Say this" banner, empty / connecting / connected states.
-- Suggestion feed (filters + counts + show-more), chat bubbles + thinking dots,
-  terminal with confirm bar + route-through-PI.
+Key files:
 
-## Phase 2 (next, separate)
-Connect the existing backend wiring (`src/`) to this interface: replace the mock data and
-local handlers in `App.tsx`/`data.ts` with the real Fireflies socket, OpenRouter calls, and
-the bridge — then retire the old `src/` interface.
+- `AuthBoundary.tsx` — session status and login screen.
+- `App.tsx` — live transcript, meeting setup, feed, chat, command review, checkpointing, and recovery UI.
+- `backend.ts` — bounded same-origin client calls and stream cancellation.
+- `feed.ts`, `graph.ts`, `session.ts` — tested pure behavior.
+- `vite.config.ts` — local API/bridge wiring; production uses `server/serve.mjs`.
+
+Run from the repository root with `npm run dev`; validate with `npm run verify`.

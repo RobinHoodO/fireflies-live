@@ -1,5 +1,9 @@
 # Design-System Integration Plan
 
+> Historical design-port plan. The v2 port is complete. Its raw-client-key and generic
+> `/bridge` contracts below are obsolete; current runtime architecture is documented in
+> `README.md` and `docs/RELIABILITY-SECURITY-FOUNDATION.md`.
+
 How to swap the current UI for the new standalone design system and re-wire it to the
 existing backend. Written for a **fresh session** to execute cheaply.
 

@@ -3,7 +3,8 @@ import { GRAPH_STATES, type GraphNodeState } from "./graph.ts";
 // Real backend wiring for the v2 interface (Phase 2).
 // Ported from the original src/App.tsx: key injection, Fireflies meetings + live
 // socket (with demo fallback), OpenRouter calls, suggestions, live answers, mode
-// proposal. The bridge (terminal) is called directly from App via /bridge/*.
+// proposal. Provider credentials and bridge authentication stay in the shared
+// server API; browser code receives only capability signals and results.
 
 export type ConnStatus = "disconnected" | "connecting" | "connected" | "error";
 export type SugType = "ask" | "do" | "note" | "command";
@@ -19,9 +20,12 @@ export interface ConstellationSource { kind: string; label: string; n: number }
 export interface Constellation { bundle: string; sources: ConstellationSource[]; counterpart: string; topic: string }
 
 export interface Meeting { id: string; title: string; sub: string; time: string; active: boolean }
+export interface InterruptedMeeting { sessionId: string; title: string; meetingId: string; recordedAt: string; sequence: number; bytes: number }
 
 // Per-built-in-mode operating context (keyed by v2 MODES ids in data.ts).
 export const MODE_CONTEXT: Record<string, string> = {
+  neutral: "Support a balanced conversation. Prioritise listening, clarity, shared understanding, and the host's explicitly stated goal without assuming a sales agenda.",
+  facilitation: "Help the host facilitate neutrally: balance participation, surface unresolved points, and keep the group oriented toward a shared outcome.",
   sales: "You're supporting the host on a sales call. Surface objections, buying signals, pricing cues, and concise responses that move the deal forward.",
   interview: "Help the host interview a candidate: propose sharp follow-up questions, flag vague or evasive answers, and track competencies.",
   standup: "Track decisions, blockers, action items and their owners. Keep everything concise and actionable.",
@@ -49,33 +53,78 @@ function modelJsonObject(raw: string): Record<string, any> | null {
   } catch { return null; }
 }
 
-export async function fetchKeys(): Promise<{ ffKey: string; orKey: string; bridgeToken: string }> {
+export async function fetchKeys(): Promise<{ ffKey: string; orKey: string; bridgeToken: string; providerPolicyError: string }> {
   try {
-    const d = await fetch("/api/fireflies-key").then(r => r.json());
-    return { ffKey: d.ffKey || "", orKey: d.orKey || "", bridgeToken: d.bridgeToken || "" };
+    const d = await fetch("/api/config").then(r => r.json());
+    // Compatibility sentinels: App still uses truthiness to enable features,
+    // but these values are capabilities — never provider keys or bridge tokens.
+    const blocked = Array.isArray(d.blockedProviders) ? d.blockedProviders.filter((value: unknown) => typeof value === "string") : [];
+    return {
+      ffKey: d.firefliesAvailable ? "server" : "",
+      orKey: d.openRouterAvailable ? "server" : "",
+      bridgeToken: d.bridgeAvailable ? "server" : "",
+      providerPolicyError: blocked.length ? `Provider processing is locked pending explicit approval: ${blocked.join(", ")}.` : "",
+    };
   } catch {
-    return { ffKey: "", orKey: "", bridgeToken: "" };
+    return { ffKey: "", orKey: "", bridgeToken: "", providerPolicyError: "" };
   }
 }
 
-export async function fileMeeting(title: string, markdown: string, bridgeToken: string): Promise<{ ok: boolean; path?: string; error?: string }> {
+export async function fileMeeting(title: string, markdown: string, _bridgeToken: string, sessionId: string, meetingId = ""): Promise<{ ok: boolean; path?: string; error?: string }> {
   try {
-    const r = await fetch("/bridge/file", {
+    const r = await fetch("/api/meeting/finalize", {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${bridgeToken}` },
-      body: JSON.stringify({ title, markdown }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId, title, meetingId, markdown }),
     });
     return await r.json();
   } catch {
-    return { ok: false, error: "bridge offline" };
+    return { ok: false, error: "meeting store offline" };
   }
 }
 
-export async function fetchContext(goal: string, counterpart: string, topic: string, bridgeToken: string): Promise<{ ok: boolean; bundle?: string; sources?: ConstellationSource[]; error?: string }> {
+export async function checkpointMeeting(sessionId: string, sequence: number, title: string, meetingId: string, markdown: string): Promise<{ ok: boolean }> {
+  const response = await fetch("/api/meeting/checkpoint", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sessionId, sequence, title, meetingId, markdown }),
+  });
+  return await response.json();
+}
+
+export function beaconMeetingCheckpoint(sessionId: string, sequence: number, title: string, meetingId: string, markdown: string): boolean {
+  if (!navigator.sendBeacon) return false;
+  const body = new Blob([JSON.stringify({ sessionId, sequence, title, meetingId, markdown })], { type: "application/json" });
+  return navigator.sendBeacon("/api/meeting/checkpoint", body);
+}
+
+export async function listInterruptedMeetings(): Promise<InterruptedMeeting[]> {
   try {
-    const r = await fetch("/bridge/context", {
+    const response = await fetch("/api/meeting/interrupted", { cache: "no-store" });
+    const value = await response.json();
+    return Array.isArray(value.sessions) ? value.sessions : [];
+  } catch { return []; }
+}
+
+export async function recoverInterruptedMeeting(sessionId: string): Promise<{ ok: boolean; path?: string; error?: string }> {
+  try {
+    const response = await fetch("/api/meeting/recover", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId }) });
+    return await response.json();
+  } catch { return { ok: false, error: "meeting store offline" }; }
+}
+
+export async function discardInterruptedMeeting(sessionId: string): Promise<{ ok: boolean }> {
+  try {
+    const response = await fetch("/api/meeting/discard", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId }) });
+    return await response.json();
+  } catch { return { ok: false }; }
+}
+
+export async function fetchContext(goal: string, counterpart: string, topic: string, _bridgeToken: string): Promise<{ ok: boolean; bundle?: string; sources?: ConstellationSource[]; error?: string }> {
+  try {
+    const r = await fetch("/api/bridge/context", {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${bridgeToken}` },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ goal, counterpart, topic }),
     });
     return await r.json();
@@ -89,12 +138,9 @@ function clock(iso: string): string {
   return isNaN(d.getTime()) ? "" : `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
-export async function fetchMeetings(apiKey: string): Promise<{ meetings: Meeting[]; error: string }> {
-  const q = `query { active_meetings { id title start_time end_time organizer_email } }`;
+export async function fetchMeetings(_apiKey: string): Promise<{ meetings: Meeting[]; error: string }> {
   try {
-    const r = await fetch("https://api.fireflies.ai/graphql", {
-      method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }, body: JSON.stringify({ query: q }),
-    });
+    const r = await fetch("/api/fireflies/meetings", { cache: "no-store" });
     const d = await r.json();
     if (d?.errors) return { meetings: [], error: d.errors[0]?.message || "API error" };
     const meetings: Meeting[] = (d?.data?.active_meetings || []).map((m: any) => ({
@@ -110,11 +156,11 @@ export async function fetchMeetings(apiKey: string): Promise<{ meetings: Meeting
   }
 }
 
-export async function callAI(messages: { role: string; content: string }[], key: string, model = "anthropic/claude-sonnet-5", maxTokens = 400): Promise<string> {
-  const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+export async function callAI(messages: { role: string; content: string }[], _key: string, model = "anthropic/claude-sonnet-5", maxTokens = 400): Promise<string> {
+  const r = await fetch("/api/ai/chat", {
     method: "POST",
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", "HTTP-Referer": "http://localhost:5173", "X-Title": "Fireflies Live" },
-    body: JSON.stringify({ model, messages, max_tokens: maxTokens, temperature: 0.7 }),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model, messages, maxTokens, temperature: 0.7 }),
   });
   const d = await r.json().catch(() => null);
   const content = d?.choices?.[0]?.message?.content;
@@ -124,10 +170,11 @@ export async function callAI(messages: { role: string; content: string }[], key:
   return `⚠ Model "${model}" returned no response (HTTP ${r.status})${detail}. It may be an invalid slug.`;
 }
 
-export async function fetchNavFrame(ctx: string, key: string, goal: string, bundleHint: string, model: string): Promise<NavFrame | null> {
-  const sys = `You are the navigator for Robin's live conversation. From the transcript, output the current situation as JSON only:
-{"phase":"opening|discovery|pitch|objections|negotiation|closing|smalltalk","stance":"<counterpart's current position/mood, one short line>","goal_progress":"<one short line vs Robin's goal>","next_move":"<the single best next move for Robin, imperative, under 15 words>","risk":"<biggest live risk, or empty string>"}
-No prose.${goal ? ` ROBIN'S GOAL: ${goal}` : ""}${bundleHint ? `\nBACKGROUND:\n${bundleHint}` : ""}`;
+export async function fetchNavFrame(ctx: string, key: string, goal: string, bundleHint: string, model: string, hostName = "Robin", meetingType = "neutral"): Promise<NavFrame | null> {
+  const host = hostName.trim() || "the host";
+  const sys = `You are the navigator for ${host}'s live conversation. The configured meeting type is "${meetingType || "neutral"}". From the transcript, output the current situation as JSON only:
+{"phase":"opening|exploration|discussion|decision|closing|smalltalk","stance":"<other participants' current position/mood, one short line>","goal_progress":"<one short line vs the host's goal>","next_move":"<the single best next move for the host, imperative, under 15 words>","risk":"<biggest live risk, or empty string>"}
+No prose.${goal ? ` HOST'S GOAL: ${goal}` : ""}${bundleHint ? `\nBACKGROUND:\n${bundleHint}` : ""}`;
   try {
     const raw = await callAI([{ role: "system", content: sys }, { role: "user", content: `Transcript (latest last):\n${ctx}` }], key, model, 250);
     const frame = JSON.parse(raw.slice(raw.indexOf("{"), raw.lastIndexOf("}") + 1));
@@ -142,8 +189,9 @@ No prose.${goal ? ` ROBIN'S GOAL: ${goal}` : ""}${bundleHint ? `\nBACKGROUND:\n$
   } catch { return null; }
 }
 
-export async function fetchSentiment(ctx: string, key: string, model: string): Promise<{ score: number; label: string } | null> {
-  const sys = `Rate the OTHER participants' current sentiment toward the conversation (exclude the speaker "You" = Robin). Output JSON only: {"score": <number -1 to 1, negative=hostile/cold, 0=neutral, positive=warm/enthusiastic>, "label": "<their mood in 1-2 words>"}. No prose.`;
+export async function fetchSentiment(ctx: string, key: string, model: string, hostName = "Robin"): Promise<{ score: number; label: string } | null> {
+  const host = hostName.trim() || "the host";
+  const sys = `Rate the OTHER participants' current sentiment toward the conversation. Exclude the configured host "${host}" and the transcript alias "You". Output JSON only: {"score": <number -1 to 1, negative=hostile/cold, 0=neutral, positive=warm/enthusiastic>, "label": "<their mood in 1-2 words>"}. No prose.`;
   try {
     const raw = await callAI([{ role: "system", content: sys }, { role: "user", content: `Transcript (latest last):\n${ctx}` }], key, model, 60);
     const value = modelJsonObject(raw);
@@ -157,7 +205,7 @@ export interface FeedUpdate { id: number | null; type?: FeedType; text: string; 
 // `order` is the AI's priority ranking; null when it left priority unchanged (saves tokens).
 export interface FeedResult { items: FeedUpdate[]; order: number[] | null }
 
-export interface FeedOpts { context: string; goal: string; bundleHint: string; meetingTitle: string; agenda: boolean }
+export interface FeedOpts { context: string; goal: string; bundleHint: string; meetingTitle: string; meetingType: string; hostName: string; agenda: boolean; commands: boolean }
 
 // One call maintains the whole live feed — suggestions AND agenda points — plus
 // their priority order. Two loops used to do this; merging halves the input cost
@@ -167,19 +215,21 @@ export async function fetchFeed(
   existing: { id: number; type: FeedType; text: string; done?: boolean; votes: number; source: "ai" | "you"; live?: boolean }[],
 ): Promise<FeedResult | null> {
   const list = existing.slice(0, 24).map(item => ({ id: item.id, type: item.type, text: item.text, votes: item.votes, source: item.source, ...(item.done ? { done: true } : {}), ...(item.live === false ? { live: false } : {}) }));
-  const sys = `You are Robin's real-time meeting copilot. You maintain ONE priority-ordered live feed for the meeting.
+  const host = opts.hostName.trim() || "the host";
+  const sys = `You are ${host}'s real-time meeting copilot. You maintain ONE priority-ordered live feed for the meeting.
 Item types:
-- "ask": a sharp question Robin could ask right now
+- "ask": a sharp question the host could ask right now
 - "do": a concrete task
-- "note": something notable to remember
-- "command": an exact single runnable shell command for Robin's machine ("text" IS the command, no prose) — only when clearly useful and safe${opts.agenda ? `
+- "note": something notable to remember${opts.commands ? `
+- "command": an exact single runnable shell command for the host's machine ("text" IS the command, no prose) — only when clearly useful, safe, and expected to be reviewed before execution` : ""}${opts.agenda ? `
 - "topic": a point still to cover in this meeting
 - "clarify": an open question or unresolved point that needs clarifying
 - "branch": a promising conversation direction worth steering into` : ""}
 MEETING: ${opts.meetingTitle || "Meeting"}
-ROBIN'S GOAL: ${opts.goal || "Advance the meeting productively."}${opts.context ? `\nCONTEXT: ${opts.context}` : ""}${opts.bundleHint ? `\nBACKGROUND (Robin's resources):\n${opts.bundleHint}` : ""}
+MEETING TYPE: ${opts.meetingType || "neutral"}
+HOST'S GOAL: ${opts.goal || "Advance the meeting productively."}${opts.context ? `\nCONTEXT: ${opts.context}` : ""}${opts.bundleHint ? `\nBACKGROUND (host-approved resources):\n${opts.bundleHint}` : ""}
 Current feed as JSON, most important first ("live":false means it has already fallen out of the moment): ${JSON.stringify(list)}
-Items with "source":"you" were written by Robin himself — that is human intuition and outranks yours: never drop them, never reword them, and keep them high unless the transcript shows they are handled. "votes" is Robin's explicit priority signal. "done" items are already handled.
+Items with "source":"you" were written by the host — that human intuition outranks yours: never drop them, never reword them, and keep them high unless the transcript shows they are handled. "votes" is the host's explicit priority signal. "done" items are already handled.
 Read the latest transcript, then return ONLY changes:
 - Refine an existing item in place with its SAME "id" and better "text" when newer context makes it sharper. Never emit a near-duplicate of an existing item.
 - FOLLOW-THROUGH: if the transcript shows an item was said, done, covered or made irrelevant, return its SAME "id" with "status":"done" and "outcome":"<how it landed, under 12 words>". Never mark done without transcript evidence.
@@ -195,7 +245,7 @@ Respond ONLY with {"items":[...]} (plus "order" when it changed). No prose, no m
     if (!value || !Array.isArray(value.items)) return null;
     const order = Array.isArray(value.order) && value.order.every((id: any) => Number.isInteger(id)) ? (value.order as number[]) : null;
     const items = value.items
-      .filter((x: any) => x && typeof x === "object" && (x.id === null || Number.isInteger(x.id)) && (x.status === undefined || x.status === "done") && (typeof x.text === "string" || (x.status === "done" && Number.isInteger(x.id))))
+      .filter((x: any) => x && typeof x === "object" && (opts.commands || x.type !== "command") && (x.id === null || Number.isInteger(x.id)) && (x.status === undefined || x.status === "done") && (typeof x.text === "string" || (x.status === "done" && Number.isInteger(x.id))))
       .slice(0, 8)
       .map((x: any) => ({
         id: Number.isInteger(x.id) ? x.id : null,
@@ -255,14 +305,14 @@ Respond ONLY with {"nodes":[{"id":<id|-1|null>,"label":"...","parent":<id|-1|nul
 // Live "Say this" answer, streamed token-by-token via onDelta so the UI shows it
 // being formulated. Resolves with the final text ("—" when no response is needed).
 export async function streamLiveAnswer(
-  ctx: string, key: string, context: string, model: string, prev: string,
+  ctx: string, _key: string, context: string, model: string, prev: string,
   onDelta: (partial: string) => void, signal?: AbortSignal,
 ): Promise<string> {
   const sys = `You are Robin's live meeting copilot. Always draft, in Robin's own first-person voice, the single best thing Robin could say right now — ready to read aloud (1-3 sentences). Frame everything from Robin's perspective. Look at the most recent turns: if someone asked Robin something, answer it directly; otherwise proactively draft the line that best steers the conversation toward Robin's stated goal. Always produce a usable response — never decline, never output a dash or placeholder. No preamble, no labels.${prev ? `\nYOUR CURRENT DRAFT (already on Robin's screen):\n${prev}\nStability matters more than novelty: if that draft is still the right thing to say, repeat it VERBATIM. Only rewrite it when the conversation has genuinely moved past it.` : ""}${context ? ` Context: ${context}` : ""}`;
-  const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+  const r = await fetch("/api/ai/stream", {
     method: "POST",
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", "HTTP-Referer": "http://localhost:5173", "X-Title": "Fireflies Live" },
-    body: JSON.stringify({ model, messages: [{ role: "system", content: sys }, { role: "user", content: `Transcript:\n${ctx}` }], max_tokens: 400, temperature: 0.7, stream: true }),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model, messages: [{ role: "system", content: sys }, { role: "user", content: `Transcript:\n${ctx}` }], maxTokens: 400, temperature: 0.7 }),
     signal,
   });
   if (!r.ok || !r.body) return "";
@@ -285,7 +335,7 @@ export async function streamLiveAnswer(
 }
 
 export async function proposeModes(ctx: string, key: string, model: string): Promise<{ label: string; context: string }[]> {
-  const sys = `You are configuring a real-time meeting copilot. From the transcript, infer the meeting type and the host's likely goal. Propose up to 4 distinct "agent modes" — each a short label plus a one-sentence context instruction. Respond ONLY as a JSON array: [{"label":"...","context":"..."}].`;
+  const sys = `You are configuring a real-time meeting copilot. From the transcript, infer the meeting type without assuming it is a sales call. Propose up to 4 distinct meeting-type labels, each with a one-sentence neutral operating instruction. Respond ONLY as a JSON array: [{"label":"...","context":"..."}].`;
   const raw = await callAI([{ role: "system", content: sys }, { role: "user", content: `Transcript:\n${ctx}` }], key, model);
   const arr = modelJsonArray(raw);
   if (!arr) return [];
@@ -304,13 +354,13 @@ const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").replac
 // the localhost bridge, streaming its output back (ANSI-stripped) so the chat shows
 // PI working in real time. Same session id => PI keeps the conversation context.
 export async function streamPI(
-  message: string, sessionId: string, bridgeToken: string,
+  message: string, sessionId: string, _bridgeToken: string,
   onDelta: (text: string) => void, signal?: AbortSignal,
 ): Promise<string> {
   // Dedicated /pi endpoint: fixed argv, no shell, provider keys injected server-side only.
-  const res = await fetch("/bridge/pi", {
+  const res = await fetch("/api/bridge/pi", {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${bridgeToken}` },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ message, sessionId }),
     signal,
   });
@@ -334,27 +384,41 @@ export async function streamPI(
 type LineCb = (speaker: string, text: string, final: boolean, key?: string) => void;
 type StatusCb = (s: ConnStatus) => void;
 
-export function connectLive(onLine: LineCb, onStatus: StatusCb, apiKey: string, meetingId: string) {
-  let socket: any = null;
+export function connectLive(onLine: LineCb, onStatus: StatusCb, _apiKey: string, meetingId: string) {
+  let controller: AbortController | null = null;
   return {
     async connect() {
       onStatus("connecting");
+      controller?.abort();
+      const activeController = new AbortController();
+      controller = activeController;
       try {
-        const { io } = await import("socket.io-client");
-        socket = io("wss://api.fireflies.ai", { path: "/ws/realtime", transports: ["websocket"], auth: { token: `Bearer ${apiKey}`, transcriptId: meetingId } });
-        socket.on("auth.failed", () => onStatus("error"));
-        socket.on("connection.established", () => onStatus("connected"));
-        socket.on("connection.error", () => onStatus("error"));
-        socket.on("transcription.broadcast", (data: any) => {
-          const p = data?.payload ?? data;
-          const text = p?.text || "";
-          if (!text) return;
-          onLine(p.speaker_name || "Speaker", text, true, `c${p.chunk_id}`);
-        });
-        socket.on("disconnect", () => onStatus("disconnected"));
-      } catch { onStatus("error"); }
+        const response = await fetch(`/api/fireflies/live?meetingId=${encodeURIComponent(meetingId)}`, { signal: activeController.signal, cache: "no-store" });
+        if (!response.ok || !response.body) { onStatus("error"); return; }
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const rows = buffer.split("\n");
+          buffer = rows.pop() || "";
+          for (const row of rows) {
+            if (!row.trim()) continue;
+            let event: any; try { event = JSON.parse(row); } catch { continue; }
+            if (event.type === "status") onStatus(event.status as ConnStatus);
+            if (event.type === "line" && event.text) onLine(event.speaker || "Speaker", event.text, event.final !== false, event.key);
+          }
+        }
+        if (!activeController.signal.aborted) onStatus("disconnected");
+      } catch (error: any) {
+        if (!activeController.signal.aborted && error?.name !== "AbortError") onStatus("error");
+      } finally {
+        if (controller === activeController) controller = null;
+      }
     },
-    disconnect() { if (socket) { socket.disconnect(); socket = null; } onStatus("disconnected"); },
+    disconnect() { controller?.abort(); controller = null; onStatus("disconnected"); },
   };
 }
 

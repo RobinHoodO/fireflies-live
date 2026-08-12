@@ -75,6 +75,25 @@ export function garbledSpeakers(lines: { speaker: string; text: string }[], minL
   return [...stats].filter(([, s]) => s.lines >= minLines && s.bad / s.lines >= 0.3).map(([speaker]) => speaker);
 }
 
+// Every transcript we hand a model goes through here, so a speaker the stream
+// is mangling never reaches one. Dropping their lines beats sending them:
+// Cyrillic noise reads to the model BOTH as Robin being silent and as Robin
+// having said something, which is how the 2026-08-07 call produced 26 Asks
+// aimed at questions he had already asked. The header says the side is unheard
+// so the model stops inferring from its absence.
+// ponytail: whole-transcript detection, per-window filter — nothing here can
+// repair the stream, only keep it from poisoning the advice.
+export function transcriptContext(lines: { speaker: string; text: string }[], window: number) {
+  const bad = garbledSpeakers(lines);
+  const usable = bad.length ? lines.filter(l => !bad.includes(l.speaker)) : lines;
+  const body = usable.slice(-window).map(l => `[${l.speaker}]: ${l.text}`).join("\n");
+  if (!bad.length) return body;
+  // 2026-07-31: every speaker garbled, so `body` is empty. The header alone is
+  // the honest input — better than handing the model an hour of noise.
+  const head = `[TRANSCRIPTION FAILING]: ${bad.join(", ")} ${bad.length > 1 ? "are" : "is"} talking, but the service is returning their audio in the wrong language, so their words are missing below. Treat that side as UNHEARD, not silent — never state what they said, and never propose asking something they may already have asked.`;
+  return body ? `${head}\n${body}` : head;
+}
+
 export function sortFeed(items: FeedItem[], sort: FeedSort) {
   if (sort === "priority") return items; // already in priority order
   return [...items].sort((a, b) => {

@@ -2,7 +2,7 @@
 // always up), so the toolbar click just opens or focuses the tab. The old
 // native-messaging dev-server launcher is gone with the localhost deployment.
 
-const URL = "http://100.114.219.63:3017/";
+const URL = "https://hetzner.tail9908c7.ts.net:8453/";
 
 chrome.action.onClicked.addListener(async () => {
   const tabs = await chrome.tabs.query({ url: `${URL}*` });

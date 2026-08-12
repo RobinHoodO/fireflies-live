@@ -35,6 +35,9 @@ lines are ≥30% non-Latin script, and the transcript pane shows a banner naming
 them while there is still time to restart the bot. The stream itself can't be
 fixed client-side — check the Fireflies workspace language setting too.
 
+**Update 2026-08-08 — root cause found, and it is not ours.** See
+[the language investigation](#the-language-lock-2026-08-08) below.
+
 ## 2. The feed cap was silently deleting items
 
 `FEED_CAP` was 60, applied as a hard `.slice(0, 60)` **after** `prioritize()`
@@ -101,10 +104,61 @@ so the dash always matches the curve it's drawn on.
 pin the dedupe and the wrong-language detector against the real strings from
 this call.
 
+## The language lock, 2026-08-08
+
+The first lead was that a workspace/account language setting reaches the
+realtime path differently than the batch path. **It doesn't. That hypothesis is
+dead**, and so is any fix on our side of the wire.
+
+What was checked:
+
+| Question | Answer |
+|---|---|
+| Fireflies **Personal** meeting language | `English (Global)` — explicit, not `Auto-detect` |
+| Fireflies **Team** meeting language | `English (Global)` — same |
+| Language param on the realtime socket | **None exists.** Auth is `{token, transcriptId}`, full stop |
+| Language field on `transcription.broadcast` | **None.** `transcript_id, chunk_id, text, speaker_name, start_time, end_time` |
+| Language anywhere else in the API | Only `addToLiveMeeting(language:)` and `uploadAudio(custom_language:)` — neither is on the realtime path, and we call neither |
+| Does our code pass language differently per path? | No. We pass none, on either path — there is no asymmetry to fix |
+
+The dropdown does offer `Auto-detect` and `Multi-Language (Auto Detect) (Beta)`.
+Robin's account is on neither. Fireflies' realtime beta is ignoring the pinned
+language and running its own detection.
+
+It is also not per-speaker, which is what the first read of this call suggested.
+On **2026-07-31**, the previous call with Max, *both* speakers came through
+Cyrillic (Robin 17/17 turns, Max 17/17). On 2026-08-07 only Robin did (70/70,
+Max 0/70). It is a whole-stream mis-detection that Max's clearer audio partly
+escaped the second time — not a channel locked to one person. Both meetings were
+Max's Zoom room; the Google Meet calls either side of them are clean.
+
+**What can't be fixed here:** the lock. No API surface reaches it. The one
+untried lever is joining the bot ourselves with
+`addToLiveMeeting(meeting_link, language: "en")` instead of letting the calendar
+auto-join it — but the bot is already in the room by then, so calling it risks a
+second notetaker in a live call, and nothing says that argument feeds the
+realtime pass rather than the batch pass that is already correct. Not worth
+firing blind during a real meeting.
+
+**What was fixed instead — keeping the garbage out of the copilot.** The banner
+told Robin; it did nothing to stop the model being fed noise. Every transcript
+handed to a model now goes through `transcriptContext` (`v2/feed.ts`), which
+drops garbled speakers' lines and replaces them with an explicit
+`[TRANSCRIPTION FAILING]` header naming them. That matters because Cyrillic
+fragments read to a model *both* as Robin being silent and as Robin having said
+something — which is how one hour produced 26 Asks re-asking his own questions.
+It filters before windowing, so losing 70% of the turns no longer starves the
+context.
+
+**And made the diff automatic.** `node server/langcheck.mjs` diffs every live
+record against its final Fireflies transcript and exits 1 on any speaker garbled
+live but clean in final. The standing rule was already "always diff live against
+final" — it was a manual ritual, so nobody ran it, which is why 31 Jul went by
+unnoticed and it took Max saying it out loud on 7 Aug.
+
 ## Still open
 
-- **The Fireflies language lock itself.** We can only warn. Worth checking
-  whether the workspace/bot can be pinned to English, since the final
-  transcription pass clearly gets it right.
+- **The lock itself**, upstream in Fireflies' realtime beta. Worth a support
+  report with these two transcript ids.
 - The live record is written once, at export. A mid-call crash still loses the
   meeting — the caps no longer do.

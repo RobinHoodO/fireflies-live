@@ -1,0 +1,5 @@
+# Generated/reference design bundles obscure the executable product graph.
+resources/
+docs/design/design-source/
+docs/design/*.html
+Fireflies Live (standalone).html

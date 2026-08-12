@@ -1,7 +1,7 @@
 # Fireflies Live Launcher (Chrome extension)
 
 One click on the toolbar icon → opens/focuses Fireflies Live, hosted on
-Thrivbe-1 (`http://100.114.219.63:3017/`, tailnet-only, always up via systemd).
+Thrivbe-1 (`https://hetzner.tail9908c7.ts.net:8453/`, tailnet-only HTTPS via Tailscale Serve, always up via systemd).
 
 ## How it works
 `background.js` opens or focuses the app tab. That's it — since the app moved
