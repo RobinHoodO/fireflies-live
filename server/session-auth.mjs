@@ -31,8 +31,13 @@ function clientKey(req) {
   return String(req.socket?.remoteAddress || "unknown");
 }
 
+function normalizeLogin(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
 export function createSessionAuth({
   loadSecret,
+  loadAllowedLogins = () => [],
   required = false,
   secureCookie = false,
   sessionTtlMs = 12 * 60 * 60 * 1000,
@@ -48,16 +53,22 @@ export function createSessionAuth({
   const clearCookie = `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${secureCookie ? "; Secure" : ""}`;
   const sessionCookie = value => `${SESSION_COOKIE}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${Math.floor(sessionTtlMs / 1000)}${secureCookie ? "; Secure" : ""}`;
 
-  function current(req) {
+  function configuration() {
     const secret = String(loadSecret() || "");
+    const allowedLogins = new Set(Array.from(loadAllowedLogins() || [], normalizeLogin).filter(Boolean));
     const enabled = required || !!secret;
-    const configured = !!secret;
+    const configured = !!secret && (!required || allowedLogins.size > 0);
+    return { secret, allowedLogins, enabled, configured };
+  }
+
+  function current(req) {
+    const { secret, allowedLogins, enabled, configured } = configuration();
     if (!enabled) return { required: false, configured: false, authenticated: true };
     if (!configured) return { required: true, configured: false, authenticated: false };
 
     const sessionId = parseCookies(req.headers.cookie)[SESSION_COOKIE];
     const session = sessionId ? sessions.get(sessionId) : undefined;
-    if (!session || session.expiresAt <= now() || session.secretFingerprint !== secretFingerprint(secret)) {
+    if (!session || session.expiresAt <= now() || session.secretFingerprint !== secretFingerprint(secret) || (session.login && !allowedLogins.has(session.login))) {
       if (sessionId) sessions.delete(sessionId);
       return { required: true, configured: true, authenticated: false };
     }
@@ -67,6 +78,17 @@ export function createSessionAuth({
   function status(req) {
     const state = current(req);
     return { required: state.required, configured: state.configured, authenticated: state.authenticated };
+  }
+
+  function bootstrap(req) {
+    const { secret, allowedLogins, configured } = configuration();
+    if (!configured) return { status: 503, body: { error: "Tailscale application access is not configured" } };
+    const login = normalizeLogin(req.headers["tailscale-user-login"]);
+    if (!login || !allowedLogins.has(login)) return { status: 403, body: { error: "Robin's Tailscale identity is required" } };
+
+    const sessionId = token();
+    sessions.set(sessionId, { expiresAt: now() + sessionTtlMs, secretFingerprint: secretFingerprint(secret), login });
+    return { status: 200, body: { authenticated: true }, cookie: sessionCookie(sessionId) };
   }
 
   function login(req, suppliedSecret) {
@@ -96,7 +118,7 @@ export function createSessionAuth({
     return { status: 200, body: { authenticated: false }, cookie: clearCookie };
   }
 
-  return { status, current, login, logout };
+  return { status, current, bootstrap, login, logout };
 }
 
-export const __test = { parseCookies, sameSecret, secretFingerprint };
+export const __test = { parseCookies, sameSecret, secretFingerprint, normalizeLogin };

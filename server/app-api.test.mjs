@@ -158,22 +158,26 @@ test("meeting finalization returns a basename rather than an infrastructure path
   assert.equal("ffKey" in meetingStoreCalls.at(-1), false);
 });
 
-test("configured Robin-only auth protects every non-auth API with an HttpOnly session", async () => {
+test("Robin's Tailscale identity protects every non-auth API with a Secure session", async () => {
   const authEnv = path.join(dir, "auth.env");
-  await writeFile(authEnv, "FIREFLIES_APP_SECRET=private-robin-secret\nFIREFLIES_ALLOWED_DATA_PROCESSORS=fireflies,openrouter\n");
-  const authApi = createAppApi({ envFile: authEnv, bridgeToken: "", recordsDir: dir, requireAuth: true, meetingStore });
+  await writeFile(authEnv, "FIREFLIES_APP_SECRET=private-robin-secret\nFIREFLIES_ALLOWED_TAILSCALE_LOGINS=robin@thrivbe.com\nFIREFLIES_ALLOWED_DATA_PROCESSORS=fireflies,openrouter\n");
+  const authApi = createAppApi({ envFile: authEnv, bridgeToken: "", recordsDir: dir, requireAuth: true, secureCookie: true, meetingStore });
   const authServer = http.createServer((req, res) => { if (!authApi(req, res)) { res.writeHead(404); res.end(); } });
   await new Promise(resolve => authServer.listen(0, "127.0.0.1", resolve));
   const authBase = `http://127.0.0.1:${authServer.address().port}`;
   try {
     assert.equal((await fetch(`${authBase}/api/config`)).status, 401);
     assert.deepEqual(await (await fetch(`${authBase}/api/auth/status`)).json(), { required: true, configured: true, authenticated: false });
-    assert.equal((await fetch(`${authBase}/api/auth/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: "wrong" }) })).status, 401);
-    const login = await fetch(`${authBase}/api/auth/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: "private-robin-secret" }) });
-    assert.equal(login.status, 200);
-    const cookie = login.headers.get("set-cookie");
+    assert.equal((await fetch(`${authBase}/api/auth/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: "private-robin-secret" }) })).status, 401);
+    assert.equal((await fetch(`${authBase}/api/auth/session`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).status, 403);
+    assert.equal((await fetch(`${authBase}/api/auth/session`, { method: "POST", headers: { "Content-Type": "application/json", "Tailscale-User-Login": "someone@example.com" }, body: "{}" })).status, 403);
+    const bootstrap = await fetch(`${authBase}/api/auth/session`, { method: "POST", headers: { "Content-Type": "application/json", "Tailscale-User-Login": "robin@thrivbe.com" }, body: "{}" });
+    assert.equal(bootstrap.status, 200);
+    const cookie = bootstrap.headers.get("set-cookie");
     assert.match(cookie, /fireflies_live_session=/);
     assert.match(cookie, /HttpOnly/);
+    assert.match(cookie, /SameSite=Strict/);
+    assert.match(cookie, /Secure/);
     assert.ok(!cookie.includes("private-robin-secret"));
     assert.equal((await fetch(`${authBase}/api/config`, { headers: { Cookie: cookie } })).status, 200);
     const logout = await fetch(`${authBase}/api/auth/logout`, { method: "POST", headers: { "Content-Type": "application/json", Cookie: cookie }, body: "{}" });

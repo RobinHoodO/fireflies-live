@@ -19,21 +19,22 @@ npm ci
 npm run dev
 ```
 
-The Vite server runs on `http://127.0.0.1:5173` and starts the bridge. Local auth is optional unless `FIREFLIES_APP_AUTH_REQUIRED=1` or `FIREFLIES_APP_SECRET` is configured. Provider processing is always explicit: add the approved processors to the env file before those capabilities turn on.
+The Vite server runs on `http://127.0.0.1:5173` and starts the bridge. Local auth is optional unless `FIREFLIES_APP_AUTH_REQUIRED=1` or `FIREFLIES_APP_SECRET` is configured. Production additionally requires an allowed Tailscale login. Provider processing is always explicit: add the approved processors to the env file before those capabilities turn on.
 
 ## Required production configuration
 
 `server/serve.mjs` requires `SERVE_HOSTS` and always fails closed when application auth is absent. Put secrets in `SERVE_ENV_FILE` (default `/opt/Thrivbe-AI/.env`), not in browser code:
 
 ```dotenv
-FIREFLIES_APP_SECRET=<unique high-entropy secret for Robin>
+FIREFLIES_APP_SECRET=<unique high-entropy server-side session secret>
+FIREFLIES_ALLOWED_TAILSCALE_LOGINS=robin@thrivbe.com
 FIREFLY_API_KEY=<Fireflies API token>
 OPENROUTER_API=<OpenRouter API token>
 FIREFLIES_ALLOWED_DATA_PROCESSORS=fireflies
 FIREFLIES_FINAL_RETENTION_DAYS=90
 ```
 
-The processor allowlist is an operational acknowledgement, not a vendor-policy decision made by this repository. Omit a provider until Robin has accepted its data handling; the UI will show the blocked capability. `FIREFLIES_APP_COOKIE_SECURE=1` is mandatory for the approved HTTPS production path; a plain-HTTP deployment cannot use the production policy.
+`FIREFLIES_APP_SECRET` never enters the browser. Tailscale Serve strips spoofed identity headers and supplies the authenticated login; only an explicitly allowed login can exchange that identity for the short-lived application session. The processor allowlist is an operational acknowledgement, not a vendor-policy decision made by this repository. Omit a provider until Robin has accepted its data handling; the UI will show the blocked capability. `FIREFLIES_APP_COOKIE_SECURE=1` is mandatory for the approved HTTPS production path; a plain-HTTP deployment cannot use the production policy.
 
 The approved production path is `https://hetzner.tail9908c7.ts.net:8453/`, terminated by Tailscale Serve and available only inside Robin's tailnet. The application backend binds `127.0.0.1:3017`; direct tailnet-IP HTTP access is intentionally removed. The current processor policy is `fireflies` only: Fireflies remains the inbound transcript source, while OpenRouter and every external AI transcript processor remain blocked.
 

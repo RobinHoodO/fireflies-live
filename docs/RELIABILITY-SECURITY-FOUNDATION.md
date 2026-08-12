@@ -4,9 +4,9 @@ This implementation protects the current Robin-only, during-meeting workflow whi
 
 ## Application authorization
 
-Production `server/serve.mjs` sets `requireAuth: true`. All non-auth `/api/*` routes fail closed with 503 until `FIREFLIES_APP_SECRET` is present in `SERVE_ENV_FILE`. A correct login creates a random, in-memory session and returns only an `HttpOnly; SameSite=Strict` cookie. Sessions expire after 12 hours by default (`FIREFLIES_APP_SESSION_HOURS`, bounded to 1–168), disappear on restart, and are invalidated by secret rotation. Login attempts are rate-limited per remote address.
+Production `server/serve.mjs` sets `requireAuth: true`. All non-auth `/api/*` routes fail closed until both `FIREFLIES_APP_SECRET` and `FIREFLIES_ALLOWED_TAILSCALE_LOGINS` are present in `SERVE_ENV_FILE`. Tailscale Serve removes spoofed identity headers before adding the authenticated `Tailscale-User-Login`; an allowlisted login can exchange that identity for a random in-memory session with an `HttpOnly; SameSite=Strict; Secure` cookie. There is no browser password or application-secret form. Sessions expire after 12 hours by default (`FIREFLIES_APP_SESSION_HOURS`, bounded to 1–168), disappear on restart, are invalidated by secret rotation, and are revoked if their Tailscale login leaves the allowlist.
 
-The Host allowlist and `Sec-Fetch-Site` checks remain defense in depth; neither is treated as identity. `Secure` cookies can be enabled with `FIREFLIES_APP_COOKIE_SECURE=1` after HTTPS exists. No systemd, TLS, service-user, firewall, or host configuration was changed in this worktree.
+The Host allowlist and `Sec-Fetch-Site` checks remain defense in depth; neither is treated as identity. The backend listens only on loopback so tailnet clients cannot forge Tailscale's proxy headers. Production uses `FIREFLIES_APP_COOKIE_SECURE=1` behind the tailnet-only HTTPS Serve route. The service-user and firewall posture remain separate reviews.
 
 ## Provider boundary and deliberate data handling
 
@@ -57,7 +57,8 @@ Meeting setup now explicitly records the host speaker label and meeting type. Ne
 Deployment prerequisites that are intentionally not applied here:
 
 1. Generate a unique high-entropy `FIREFLIES_APP_SECRET` directly in the production secret file; never print or copy it into the repository.
-2. Keep `FIREFLIES_ALLOWED_DATA_PROCESSORS=fireflies` until Robin explicitly approves another processor.
-3. Keep the app behind the tailnet-only Tailscale Serve HTTPS endpoint with Secure cookies; do not enable Funnel for this port.
-4. Preview lifecycle output before scheduling `npm run cleanup:meetings:apply` externally.
-5. Separately review the existing root service user; this deployment does not broaden its access or claim that the command bridge is sandboxed.
+2. Set `FIREFLIES_ALLOWED_TAILSCALE_LOGINS=robin@thrivbe.com`; an empty or different allowlist fails closed.
+3. Keep `FIREFLIES_ALLOWED_DATA_PROCESSORS=fireflies` until Robin explicitly approves another processor.
+4. Keep the app behind the tailnet-only Tailscale Serve HTTPS endpoint with Secure cookies; do not enable Funnel for this port.
+5. Preview lifecycle output before scheduling `npm run cleanup:meetings:apply` externally.
+6. Separately review the existing root service user; this deployment does not broaden its access or claim that the command bridge is sandboxed.

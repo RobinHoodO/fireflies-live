@@ -89,10 +89,17 @@ export function createAppApi({
       fireflies: process.env.FIREFLY_API_KEY || readKey(env, "FIREFLY_API_KEY"),
       openRouter: process.env.OPENROUTER_API || process.env.OPENROUTER_API_KEY || readKey(env, "OPENROUTER_API") || readKey(env, "OPENROUTER_API_KEY"),
       appSecret: process.env.FIREFLIES_APP_SECRET || readKey(env, "FIREFLIES_APP_SECRET"),
+      allowedTailscaleLogins: new Set((process.env.FIREFLIES_ALLOWED_TAILSCALE_LOGINS || readKey(env, "FIREFLIES_ALLOWED_TAILSCALE_LOGINS")).split(",").map(value => value.trim().toLowerCase()).filter(Boolean)),
       allowedProcessors: new Set((process.env.FIREFLIES_ALLOWED_DATA_PROCESSORS || readKey(env, "FIREFLIES_ALLOWED_DATA_PROCESSORS")).split(",").map(value => value.trim().toLowerCase()).filter(Boolean)),
     };
   };
-  const auth = createSessionAuth({ loadSecret: () => loadSecrets().appSecret, required: requireAuth, secureCookie, ...(sessionTtlMs ? { sessionTtlMs } : {}) });
+  const auth = createSessionAuth({
+    loadSecret: () => loadSecrets().appSecret,
+    loadAllowedLogins: () => loadSecrets().allowedTailscaleLogins,
+    required: requireAuth,
+    secureCookie,
+    ...(sessionTtlMs ? { sessionTtlMs } : {}),
+  });
   const providerAllowed = (secrets, provider) => secrets.allowedProcessors.has(provider);
 
   async function bridge(req, res, route, stream = false) {
@@ -231,12 +238,10 @@ export function createAppApi({
     if (req.method === "OPTIONS") { json(res, 403, { error: "forbidden" }); return true; }
     if (req.method === "POST" && !String(req.headers["content-type"] || "").includes("application/json")) { json(res, 415, { error: "json only" }); return true; }
     if (req.method === "GET" && url.pathname === "/api/auth/status") { json(res, 200, auth.status(req)); return true; }
-    if (req.method === "POST" && url.pathname === "/api/auth/login") {
-      readJson(req, 10_000).then(body => {
-        const result = auth.login(req, body.password);
-        if (result.cookie) res.setHeader("Set-Cookie", result.cookie);
-        json(res, result.status, result.body);
-      }).catch(error => json(res, error?.statusCode || 400, { error: error?.message || "invalid request" }));
+    if (req.method === "POST" && url.pathname === "/api/auth/session") {
+      const result = auth.bootstrap(req);
+      if (result.cookie) res.setHeader("Set-Cookie", result.cookie);
+      json(res, result.status, result.body);
       return true;
     }
     if (req.method === "POST" && url.pathname === "/api/auth/logout") {

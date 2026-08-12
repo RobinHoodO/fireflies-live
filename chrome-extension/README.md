@@ -4,9 +4,10 @@ One click on the toolbar icon → opens/focuses Fireflies Live, hosted on
 Thrivbe-1 (`https://hetzner.tail9908c7.ts.net:8453/`, tailnet-only HTTPS via Tailscale Serve, always up via systemd).
 
 ## How it works
-`background.js` opens or focuses the app tab. That's it — since the app moved
-to Thrivbe-1 (2026-07-30) there is no local dev server to boot, so the old
-native-messaging launcher (`native-host/`) is retired.
+`background.js` opens or focuses the app tab. On update or Chrome startup it
+also migrates tabs left on the retired direct-IP URL to the private HTTPS URL.
+Since the app moved to Thrivbe-1 (2026-07-30) there is no local dev server to
+boot, so the old native-messaging launcher (`native-host/`) is retired.
 
 Requires the Mac to be on the tailnet (Tailscale running).
 
@@ -14,7 +15,8 @@ Requires the Mac to be on the tailnet (Tailscale running).
 1. Open `chrome://extensions`
 2. Toggle **Developer mode** on (top-right)
 3. **Load unpacked** → select this folder — or hit ⟳ on the existing card
-   after pulling changes
+   after pulling changes. Unpacked extensions do not auto-update; the checked-in
+   manifest version makes the loaded revision visible.
 4. Pin the "Fireflies Live Launcher" icon. Click it — done.
 
 ## Files
