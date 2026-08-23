@@ -21,17 +21,21 @@ only breaks ties, done sinks. Never let the AI rewrite a `source:"you"` item.
 ## Hosted on Thrivbe-1 (since 2026-07-30)
 
 Production runs on Thrivbe-1: `fireflies-live.service` → `server/serve.mjs`
-(static `v2/dist` + key injection + `/bridge` proxy) on tailnet
+(static `v2/dist` + authenticated same-origin app API + localhost bridge) on tailnet
 `100.114.219.63:3017` (ufw tailnet-only). The Chrome extension opens that URL.
+Production API access requires a Robin-only HttpOnly session; Host headers are defense in
+depth, never identity.
 Deploy: push to GitHub, then on the server
 `cd /opt/Thrivbe-AI/lab/fireflies-live && git pull && npm ci && npm run build && sudo systemctl restart fireflies-live`.
 Failure pings Telegram via `OnFailure=os-ping-fail@%n`. **The only real
 network boundary is ufw** (tailnet-only) — the Host/Sec-Fetch gates in
 serve.mjs only stop browser-mediated attacks; after any firewall change,
 re-check `sudo ufw status` still denies public access to 3017. Meeting records
-(`/file`) land in `/opt/Thrivbe-AI/content/meetings/transcripts/` on the server.
-Session content persists in localStorage (`v2/session.ts`) — reloads restore
-the meeting and auto-reconnect within 10min.
+land in `/opt/Thrivbe-AI/content/meetings/transcripts/` on the server. Session
+content persists in localStorage (`v2/session.ts`) — reloads restore the meeting
+and auto-reconnect within 10min — and the server keeps fsynced append-only 30s
+checkpoints for interrupted-session recovery. See
+`docs/RELIABILITY-SECURITY-FOUNDATION.md`.
 
 ## Run / build / verify
 
@@ -40,9 +44,14 @@ the meeting and auto-reconnect within 10min.
   child.
 - `npm run verify` — **the gate; run before considering any change done.**
   Chains lint (`oxlint v2 server`) + `node --test` + build (which typechecks
-  v2 via `tsc -p tsconfig.v2.json`).
+  v2 via `tsc -p tsconfig.v2.json`) + production dependency audit.
 - `npm test` — `node --test` alone (bridge guards + v2 pure-helper tests; `.ts`
   tests run natively on Node 22).
+- `node server/langcheck.mjs` — diffs every saved live record against its final
+  Fireflies transcript, exit 1 on a speaker garbled live but clean in final.
+  **The final transcript never proves realtime was correct** (Fireflies' realtime
+  beta transcribes in the wrong language and the batch pass hides it) — this diff
+  is the only evidence. Run it after any meeting you care about.
 
 ## Bridge security invariants (never regress)
 
@@ -52,8 +61,9 @@ every change as security-sensitive. Invariants, frozen as tests in
 
 - Binds 127.0.0.1 only; Host header allowlisted (anti DNS-rebinding);
   OPTIONS→403; no CORS headers on purpose.
-- Every protected endpoint requires the per-session bearer token (injected by
-  the Vite plugin, `randomUUID` per boot).
+- Every protected endpoint requires the per-session bearer token (`randomUUID`
+  per boot). It is now injected by the same-origin server API on the loopback
+  hop and is never returned to browser JavaScript.
 - `/run` and `/pi` refuse denylisted commands — but "denylist is a fat-finger
   guard, not a sandbox — operator has full shell on their own box by design"
   (see the ponytail note at the end of bridge.mjs).
@@ -64,9 +74,13 @@ every change as security-sensitive. Invariants, frozen as tests in
 
 ## Env
 
-Keys live in `/Users/robinsverd/Thrivbe-AI/.env`: `FIREFLY_API_KEY` (the
-Fireflies token, despite the name) and `OPENROUTER_API`. The dev middleware
-(`/api/fireflies-key`) injects them; never hardcode or paste values.
+Keys live in `/Users/robinsverd/Thrivbe-AI/Thrivbe-OS/.env` locally and `SERVE_ENV_FILE` in
+production: `FIREFLY_API_KEY` (the Fireflies token, despite the name),
+`OPENROUTER_API`, and `FIREFLIES_APP_SECRET`. `server/app-api.mjs` uses them only
+server-side. External calls additionally require explicit names in
+`FIREFLIES_ALLOWED_DATA_PROCESSORS`; `/api/config` returns capability/policy
+signals, never provider credentials or the broad bridge token. Retention settings
+and the dry-run cleanup command are documented in `README.md`.
 
 ## Conventions
 
@@ -78,7 +92,7 @@ Fireflies token, despite the name) and `OPENROUTER_API`. The dev middleware
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **fireflies-live** (1226 symbols, 2410 relationships, 105 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **fireflies-live** (1097 symbols, 1897 relationships, 69 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 

@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div style="display:flex;flex-direction:column;gap:20px;">
+  <sc-for list="{{ rows }}" as="m" hint-placeholder-count="3">
+    <sc-if value="{{ m.isUser }}">
+      <div style="display:flex;justify-content:flex-end;">
+        <div style="max-width:80%;padding:14px 18px;background:var(--ac,oklch(0.585 0.16 242));color:#fff;border-radius:16px 16px 4px 16px;font-size:14.5px;line-height:1.6;">{{ m.text }}</div>
+      </div>
+    </sc-if>
+    <sc-if value="{{ m.isAgent }}">
+      <div style="display:flex;gap:13px;align-items:flex-start;">
+        <span style="display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:10px;background:var(--ac-tint,oklch(0.965 0.03 242));flex:0 0 auto;margin-top:2px;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--ac,oklch(0.585 0.16 242))" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-sparkles"/></svg></span>
+        <div style="flex:1 1 auto;min-width:0;padding:14px 18px;background:oklch(0.98 0.004 250);border:1px solid oklch(0.93 0.006 255);border-radius:4px 16px 16px 16px;font-size:14.5px;color:oklch(0.3 0.02 255);" dangerouslySetInnerHTML="{{ m.html }}"></div>
+      </div>
+    </sc-if>
+  </sc-for>
+  <sc-if value="{{ thinking }}">
+    <div style="display:flex;gap:13px;align-items:center;">
+      <span style="display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:10px;background:var(--ac-tint,oklch(0.965 0.03 242));flex:0 0 auto;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--ac,oklch(0.585 0.16 242))" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-sparkles"/></svg></span>
+      <div style="display:flex;gap:5px;padding:14px 18px;background:oklch(0.98 0.004 250);border:1px solid oklch(0.93 0.006 255);border-radius:4px 16px 16px 16px;">
+        <span style="width:7px;height:7px;border-radius:50%;background:oklch(0.6 0.02 255);animation:fl-think 1.2s ease-in-out infinite;"></span>
+        <span style="width:7px;height:7px;border-radius:50%;background:oklch(0.6 0.02 255);animation:fl-think 1.2s ease-in-out .2s infinite;"></span>
+        <span style="width:7px;height:7px;border-radius:50%;background:oklch(0.6 0.02 255);animation:fl-think 1.2s ease-in-out .4s infinite;"></span>
+      </div>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:760,&quot;height&quot;:300},&quot;messages&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;any[]&quot;},&quot;thinking&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;}}">
+class Component extends DCLogic {
+  renderVals(){
+    const msgs = this.props.messages || [];
+    return {
+      rows: msgs.map(m=>({ ...m, isUser:m.role==='user', isAgent:m.role==='agent' })),
+      thinking: !!this.props.thinking,
+    };
+  }
+}
+</script>
+</body>
+</html>

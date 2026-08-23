@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div style="display:flex;align-items:flex-end;gap:10px;padding:8px 8px 8px 18px;background:#fff;border:1px solid oklch(0.91 0.006 255);border-radius:16px;box-shadow:0 1px 2px rgba(16,24,40,.04);" style-focus-within="border-color:var(--ac,oklch(0.585 0.16 242));box-shadow:0 0 0 3px var(--ac-tint2,oklch(0.93 0.05 242));">
+  <textarea value="{{ value }}" onInput="{{ oninput }}" onKeyDown="{{ onkey }}" placeholder="{{ placeholder }}" rows="1" style="flex:1 1 auto;min-width:0;border:none;outline:none;background:none;resize:none;font-family:inherit;font-size:14.5px;line-height:1.5;color:oklch(0.3 0.02 255);padding:9px 0;max-height:120px;"></textarea>
+  <button onClick="{{ onsend }}" style="display:inline-flex;align-items:center;justify-content:center;width:42px;height:42px;border-radius:11px;background:var(--ac,oklch(0.585 0.16 242));border:none;color:#fff;cursor:pointer;flex:0 0 auto;" style-hover="background:var(--ac-hover,oklch(0.5 0.17 242));"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-send"/></svg></button>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:760,&quot;height&quot;:70},&quot;value&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;placeholder&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Type a message…&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;oninput&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;(e:any)=&gt;void&quot;},&quot;onkey&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;(e:any)=&gt;void&quot;},&quot;onsend&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;()=&gt;void&quot;}}">
+class Component extends DCLogic {
+  renderVals(){
+    return {
+      value: this.props.value || '',
+      oninput: this.props.oninput || (()=>{}),
+      onkey: this.props.onkey || (()=>{}),
+      onsend: this.props.onsend || (()=>{}),
+      placeholder: this.props.placeholder || 'Type a message…',
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -15,7 +15,7 @@ function firefliesKeyPlugin() {
     name: "fireflies-key",
     configureServer(server: any) {
       const api = createAppApi({
-        envFile: path.resolve("/Users/robinsverd/Thrivbe-AI/.env"),
+        envFile: path.resolve("/Users/robinsverd/Thrivbe-AI/Thrivbe-OS/.env"),
         bridgeToken,
         recordsDir: process.env.BRIDGE_FILE_DIR || path.resolve(__dirname, "../../../content/meetings/transcripts"),
         requireAuth: process.env.FIREFLIES_APP_AUTH_REQUIRED === "1",

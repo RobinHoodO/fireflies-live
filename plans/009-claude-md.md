@@ -76,7 +76,7 @@ Create `CLAUDE.md` at the repo root, ≤~60 lines, covering exactly these sectio
    guard, not a sandbox (quote the ponytail note); file reads are rooted under
    `content/`/`clients/`; `/file` writes only into the fixed transcripts dir with a
    sanitized slug. Point at `server/bridge.test.mjs` as the guard's regression net.
-5. **Env** — keys live at `/Users/robinsverd/Thrivbe-AI/.env`
+5. **Env** — keys live at `/Users/robinsverd/Thrivbe-AI/Thrivbe-OS/.env`
    (`FIREFLY_API_KEY` = the Fireflies token despite the name, `OPENROUTER_API`);
    injected by the dev middleware, never hardcoded. Reference names only — never
    paste values.
