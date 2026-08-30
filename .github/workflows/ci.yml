@@ -1,0 +1,23 @@
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      # `npm run verify` is the repo's own gate: oxlint + node --test +
+      # typecheck/build + production dependency audit. Keep CI and local
+      # identical so a green here means the same thing as a green there.
+      - run: npm ci
+      - run: npm run verify
