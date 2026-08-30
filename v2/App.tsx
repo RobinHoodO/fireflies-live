@@ -52,6 +52,7 @@ const restoredFlags = () => {
 // ever sees the top 24 items and the transcript only feeds off the tail, so
 // nothing downstream needed these to be small; they only bounded the record.
 const FEED_CAP = 400;
+const FEED_PREVIEW = 12;   // shown before "Show N more"; the rest stay in feed
 const LINES_CAP = 3000;
 // Say-this steadiness: a fresh draft every few seconds reads as jumpy and
 // untrustworthy, so redraft slowly and only on the counterpart's turn.
@@ -102,6 +103,9 @@ export default function App() {
   // Multi-select chips — empty means "everything".
   const [filters, setFilters] = useState<string[]>(() => Array.isArray(SAVED.filters) ? SAVED.filters.filter((f: any) => FILTERS.some(x => x.id === f)) : []);
   const [hideDone, setHideDone] = useState<boolean>(SAVED.hideDone ?? false);
+  // Deliberately not persisted: "show everything" is a moment's intent, not a
+  // preference. A new call opens on the short list.
+  const [feedExpanded, setFeedExpanded] = useState(false);
   const [feedSort, setFeedSort] = useState<FeedSort>(() => FEED_SORTS.includes(SAVED.feedSort) ? SAVED.feedSort : "priority");
   const [mode, setMode] = useState<string>(SAVED.mode ?? "neutral");
   const [hostName, setHostName] = useState<string>(typeof SAVED.hostName === "string" ? SAVED.hostName : "Robin");
@@ -872,6 +876,11 @@ export default function App() {
     feed.filter(x => (!filters.length || filters.some(f => matchesFilter(x.type, f))) && (!hideDone || x.status !== "done")),
     feedSort,
   ), [feed, filters, hideDone, feedSort]);
+  // Full history is kept (FEED_CAP); only the head of it is shown. Mid-call the
+  // list is scanned, not read — a 400-item scroll buries the items the sort
+  // just worked out were the important ones.
+  const shownFeed = feedExpanded ? visibleFeed : visibleFeed.slice(0, FEED_PREVIEW);
+  const hiddenFeedCount = visibleFeed.length - shownFeed.length;
   // Calm mode intentionally has one slot and may stay silent. Only something
   // Robin wrote or explicitly promoted can interrupt the meeting surface.
   const pinnedCue = feed.find(item => item.status !== "done" && item.live !== false && item.type !== "command" && (item.source === "you" || item.votes > 0));
@@ -1160,9 +1169,9 @@ export default function App() {
             so the filter row and the list read as one taxonomy. */}
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 7, marginBottom: 10 }}>
           <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "oklch(0.68 0.012 255)", marginRight: 3 }}>Show</span>
-          <button onClick={() => setFilters([])} style={{ ...typeChip(filters.length === 0, C.text, C.tint, false), fontWeight: 700 }}>All<span style={countBadge(filters.length === 0)}>{feed.length}</span></button>
+          <button onClick={() => setFilters([])} aria-pressed={filters.length === 0} style={{ ...typeChip(filters.length === 0, C.text, C.tint, false), fontWeight: 700 }}>All<span style={countBadge(filters.length === 0)}>{feed.length}</span></button>
           {FILTERS.map(f => { const active = filters.includes(f.id); return (
-            <button key={f.id} onClick={() => toggleFilter(f.id)} title={`${active ? "Hide" : "Show"} ${f.l.toLowerCase()} items`} style={typeChip(active, f.color, f.bg, counts[f.id] === 0)}>
+            <button key={f.id} onClick={() => toggleFilter(f.id)} aria-pressed={active} title={`${active ? "Hide" : "Show"} ${f.l.toLowerCase()} items`} style={typeChip(active, f.color, f.bg, counts[f.id] === 0)}>
               <Icon id={f.ic} size={13} stroke={active ? f.color : "oklch(0.6 0.015 255)"} />{f.l}<span style={countBadge(active)}>{counts[f.id]}</span>
             </button>
           ); })}
@@ -1179,7 +1188,7 @@ export default function App() {
             <option value="type">Grouped by type</option>
             <option value="open">Unhandled first</option>
           </select>
-          <button onClick={() => setHideDone(d => !d)} title="Hide items already handled" style={viewControl(hideDone)}>
+          <button onClick={() => setHideDone(d => !d)} aria-pressed={hideDone} title="Hide items already handled" style={viewControl(hideDone)}>
             <Icon id={hideDone ? "i-check" : "i-x"} size={13} />Hide done
           </button>
           <div style={{ flex: "1 1 auto" }} />
@@ -1191,7 +1200,7 @@ export default function App() {
         </div>
         {!orKey && <div style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 11.5, fontWeight: 600, color: "oklch(0.6 0.015 255)", marginBottom: 14 }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: "oklch(0.78 0.14 75)" }} />AI offline — set OPENROUTER_API</div>}
         <div className="fl-scroll" style={{ display: "flex", flexDirection: "column", gap: 8, flex: "1 1 auto", minHeight: 0, overflowY: "auto", paddingRight: 4 }}>
-          {visibleFeed.map(item => { const m = SUGMETA[item.type]; const done = item.status === "done"; return (
+          {shownFeed.map(item => { const m = SUGMETA[item.type]; const done = item.status === "done"; return (
             <div key={item.id} style={{ display: "flex", gap: 9, width: "100%", padding: "10px 12px", background: "#fff", border: `1px solid ${item.votes > 0 ? "var(--ac-border)" : "oklch(0.93 0.006 255)"}`, borderRadius: 12, opacity: done ? 0.5 : 1 }}>
               <button onClick={() => toggleFeedItem(item.id)} title={done ? "Reopen" : "Mark handled"} className="fl-hover-soft" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 30, height: 30, borderRadius: 9, flex: "0 0 auto", border: "none", background: done ? "oklch(0.96 0.04 155)" : m.bg, cursor: "pointer" }}>
                 <Icon id={done ? "i-check" : m.icon} size={15} stroke={done ? "oklch(0.5 0.14 155)" : m.color} />
@@ -1212,6 +1221,12 @@ export default function App() {
               </div>
             </div>
           ); })}
+          {(hiddenFeedCount > 0 || feedExpanded) && (
+            <button onClick={() => setFeedExpanded(e => !e)} aria-expanded={feedExpanded} className="fl-hover-soft"
+              style={{ flex: "0 0 auto", padding: "9px 12px", border: `1px dashed ${BORDER}`, borderRadius: 11, background: "transparent", fontFamily: "inherit", fontSize: 12, fontWeight: 700, color: "oklch(0.48 0.02 255)", cursor: "pointer" }}>
+              {feedExpanded ? `Show fewer — top ${FEED_PREVIEW} only` : `Show ${hiddenFeedCount} more`}
+            </button>
+          )}
           {visibleFeed.length === 0 && <div style={{ padding: 24, textAlign: "center", fontSize: 13.5, color: "oklch(0.6 0.015 255)", lineHeight: 1.5 }}>{feed.length ? "Nothing matches these filters." : "Agenda points and suggestions stream in here as the conversation evolves. Tap one to ask the AI, ▲ to pin it to the top."}</div>}
         </div>
         <div style={{ display: "flex", gap: 8, marginTop: 12, flex: "0 0 auto" }}>
@@ -1327,13 +1342,13 @@ export default function App() {
             both. The topic tree always stays: it IS the trajectory. */}
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 7, padding: "12px 28px", borderBottom: "1px solid oklch(0.95 0.005 250)", flex: "0 0 auto" }}>
           <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "oklch(0.68 0.012 255)", marginRight: 3 }}>Show on map</span>
-          <button onClick={() => setFilters([])} style={{ ...typeChip(filters.length === 0, C.text, C.tint, false) }}>All<span style={countBadge(filters.length === 0)}>{feed.length}</span></button>
+          <button onClick={() => setFilters([])} aria-pressed={filters.length === 0} style={{ ...typeChip(filters.length === 0, C.text, C.tint, false) }}>All<span style={countBadge(filters.length === 0)}>{feed.length}</span></button>
           {FILTERS.map(f => { const active = filters.includes(f.id); return (
-            <button key={f.id} onClick={() => toggleFilter(f.id)} style={typeChip(active, f.color, f.bg, counts[f.id] === 0)}>
+            <button key={f.id} onClick={() => toggleFilter(f.id)} aria-pressed={active} title={`${active ? "Hide" : "Show"} ${f.l.toLowerCase()} items`} style={typeChip(active, f.color, f.bg, counts[f.id] === 0)}>
               <Icon id={f.ic} size={13} stroke={active ? f.color : "oklch(0.6 0.015 255)"} />{f.l}<span style={countBadge(active)}>{counts[f.id]}</span>
             </button>
           ); })}
-          <button onClick={() => setHideDone(d => !d)} style={viewControl(hideDone)}><Icon id={hideDone ? "i-check" : "i-x"} size={13} />Hide done</button>
+          <button onClick={() => setHideDone(d => !d)} aria-pressed={hideDone} title="Hide items already handled" style={viewControl(hideDone)}><Icon id={hideDone ? "i-check" : "i-x"} size={13} />Hide done</button>
         </div>
         <div ref={mapViewportRef} style={{ flex: "1 1 auto", minHeight: 0, overflow: "hidden", position: "relative", background: "radial-gradient(900px 600px at 50% 40%, var(--ac-tint), transparent 70%)" }}>
           {placed.length === 0 ? (
