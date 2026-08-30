@@ -18,6 +18,12 @@ const upstreamCalls = [];
 const liveCalls = [];
 let piAbortObserved = false;
 const meetingStoreCalls = [];
+// app-api prefers process.env over the env file, by design. A developer shell
+// that exports a real provider key would therefore silently replace the canary
+// and the "no credential reaches the browser" assertions would test the wrong
+// secret. Own the environment for the duration of the run.
+const OWNED_ENV = ["FIREFLY_API_KEY", "OPENROUTER_API", "OPENROUTER_API_KEY", "FIREFLIES_APP_SECRET", "FIREFLIES_ALLOWED_TAILSCALE_LOGINS", "FIREFLIES_ALLOWED_DATA_PROCESSORS"];
+const savedEnv = new Map();
 
 const meetingStore = {
   checkpoint: async () => ({ ok: true }),
@@ -28,6 +34,7 @@ const meetingStore = {
 };
 
 before(async () => {
+  for (const name of OWNED_ENV) { savedEnv.set(name, process.env[name]); delete process.env[name]; }
   dir = await mkdtemp(path.join(tmpdir(), "fireflies-app-api-"));
   envFile = path.join(dir, ".env");
   await writeFile(envFile, `FIREFLY_API_KEY=${FIREFLIES_SECRET}\nOPENROUTER_API=${OPENROUTER_SECRET}\nFIREFLIES_ALLOWED_DATA_PROCESSORS=fireflies,openrouter\n`);
@@ -67,6 +74,7 @@ before(async () => {
 after(async () => {
   await new Promise(resolve => server.close(resolve));
   await rm(dir, { recursive: true, force: true });
+  for (const [name, value] of savedEnv) { if (value === undefined) delete process.env[name]; else process.env[name] = value; }
 });
 
 test("browser config exposes capabilities, never raw credentials", async () => {
