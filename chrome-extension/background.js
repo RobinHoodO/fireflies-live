@@ -1,6 +1,7 @@
-// One-click opener. Fireflies Live is hosted on Thrivbe-1 (tailnet, systemd —
-// always up), so the toolbar click just opens or focuses the tab. The old
-// native-messaging dev-server launcher is gone with the localhost deployment.
+// Service worker. The toolbar button now opens the side panel (the copilot's
+// dock, see sidepanel.html); opening or focusing the app tab moved to a message
+// the panel sends, because the app itself cannot live inside the panel — its
+// session cookie is SameSite=Strict, so a cross-site frame would land logged out.
 
 const URL = "https://hetzner.tail9908c7.ts.net:8453/";
 const LEGACY_URLS = ["http://100.114.219.63:3017/"];
@@ -37,6 +38,16 @@ async function migrateLegacyTabs() {
 
 const reportError = error => console.error("Fireflies Live launcher failed", error);
 
-chrome.action.onClicked.addListener(() => openOrFocus().catch(reportError));
-chrome.runtime.onInstalled.addListener(() => migrateLegacyTabs().catch(reportError));
-chrome.runtime.onStartup.addListener(() => migrateLegacyTabs().catch(reportError));
+// Clicking the toolbar icon opens the panel instead of firing action.onClicked.
+async function dockPanel() {
+  await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+}
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type !== "open-app") return false;
+  openOrFocus().then(() => sendResponse({ ok: true })).catch(error => { reportError(error); sendResponse({ ok: false }); });
+  return true; // response is async
+});
+
+chrome.runtime.onInstalled.addListener(() => Promise.all([dockPanel(), migrateLegacyTabs()]).catch(reportError));
+chrome.runtime.onStartup.addListener(() => Promise.all([dockPanel(), migrateLegacyTabs()]).catch(reportError));
