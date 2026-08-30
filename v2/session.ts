@@ -5,8 +5,13 @@
 export const SESSION_MAX_AGE_MS = 6 * 3600_000; // restore content up to 6h old
 export const RESUME_MAX_AGE_MS = 10 * 60_000;   // auto-reconnect only within 10min
 
+// Bump whenever the persisted shape changes in a way a restore can't absorb.
+// A mismatch throws the blob away rather than feeding a half-understood object
+// into the app — the cost is one lost restore on the deploy that bumps it.
+export const SESSION_VERSION = 1;
+
 export function packSession(state: Record<string, unknown>, now: number): string {
-  return JSON.stringify({ ...state, savedAt: now });
+  return JSON.stringify({ ...state, v: SESSION_VERSION, savedAt: now });
 }
 
 // Returns the parsed session blob, or {} when absent, invalid, or stale.
@@ -15,6 +20,7 @@ export function unpackSession(raw: string | null, now: number, maxAgeMs: number 
   try {
     const s = JSON.parse(raw);
     if (!s || typeof s !== "object" || Array.isArray(s)) return {};
+    if (s.v !== SESSION_VERSION) return {};
     if (typeof s.savedAt !== "number" || now - s.savedAt > maxAgeMs || s.savedAt > now + 60_000) return {};
     return s;
   } catch { return {}; }
