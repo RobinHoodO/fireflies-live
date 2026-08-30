@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { packSession, unpackSession, shouldAutoResume, SESSION_MAX_AGE_MS } from "./session.ts";
+import { packSession, unpackSession, shouldAutoResume, SESSION_MAX_AGE_MS, SESSION_VERSION } from "./session.ts";
 
 const NOW = 1_800_000_000_000;
 
@@ -27,6 +27,17 @@ test("garbage and absent input give empty session", () => {
 test("future-stamped session is discarded", () => {
   const raw = packSession({}, NOW + 3_600_000);
   assert.deepEqual(unpackSession(raw, NOW), {});
+});
+
+test("a blob from another schema version is discarded, not half-restored", () => {
+  const stamped = JSON.parse(packSession({ lines: [{ speaker: "You", text: "hi", id: "l1" }] }, NOW));
+  assert.equal(stamped.v, SESSION_VERSION);
+  // Written by an older build (no version at all), and by a newer one.
+  const legacy = JSON.stringify({ lines: stamped.lines, savedAt: NOW });
+  const future = JSON.stringify({ ...stamped, v: SESSION_VERSION + 1 });
+  assert.deepEqual(unpackSession(legacy, NOW + 5_000), {});
+  assert.deepEqual(unpackSession(future, NOW + 5_000), {});
+  assert.deepEqual(unpackSession(JSON.stringify({ ...stamped, v: String(SESSION_VERSION) }), NOW + 5_000), {});
 });
 
 test("auto-resume only when recent and previously connected", () => {
