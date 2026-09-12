@@ -7,8 +7,15 @@ const JSON_LIMIT = 6_000_000;
 
 function readKey(env, name) {
   const match = env.match(new RegExp(`^${name}=(.*)$`, "m"));
-  return match ? match[1].trim().replace(/^["']|["']$/g, "").trim() : "";
+  const value = match ? match[1].trim().replace(/^["']|["']$/g, "").trim() : "";
+  return value.startsWith("op://") ? "" : value; // a 1Password address, not a value (Phase 6)
 }
+
+// Values from oprun are real; an op:// one means "not resolved", so treat it as unset.
+const fromEnv = name => {
+  const value = process.env[name] || "";
+  return value.startsWith("op://") ? "" : value;
+};
 
 function json(res, status, value) {
   res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" });
@@ -84,13 +91,19 @@ export function createAppApi({
 }) {
   const loadSecrets = () => {
     let env = "";
-    try { env = readFileSync(envFile, "utf8"); } catch { /* unavailable providers stay offline */ }
+    let fileReadable = false;
+    try { env = readFileSync(envFile, "utf8"); fileReadable = true; } catch { /* unavailable providers stay offline */ }
+    // Policy (plaintext, not secret) is read from the FILE whenever it is readable, so an edit still
+    // grants/revokes a login or a data processor on the next request with no restart. A value that
+    // oprun (or anything else) put in process.env at start must not freeze it.
+    const policy = name => (fileReadable ? readKey(env, name) : fromEnv(name));
     return {
-      fireflies: process.env.FIREFLY_API_KEY || readKey(env, "FIREFLY_API_KEY"),
-      openRouter: process.env.OPENROUTER_API || process.env.OPENROUTER_API_KEY || readKey(env, "OPENROUTER_API") || readKey(env, "OPENROUTER_API_KEY"),
-      appSecret: process.env.FIREFLIES_APP_SECRET || readKey(env, "FIREFLIES_APP_SECRET"),
-      allowedTailscaleLogins: new Set((process.env.FIREFLIES_ALLOWED_TAILSCALE_LOGINS || readKey(env, "FIREFLIES_ALLOWED_TAILSCALE_LOGINS")).split(",").map(value => value.trim().toLowerCase()).filter(Boolean)),
-      allowedProcessors: new Set((process.env.FIREFLIES_ALLOWED_DATA_PROCESSORS || readKey(env, "FIREFLIES_ALLOWED_DATA_PROCESSORS")).split(",").map(value => value.trim().toLowerCase()).filter(Boolean)),
+      // Secrets: environment first (oprun resolves them once at start); rotating one = restart the unit.
+      fireflies: fromEnv("FIREFLY_API_KEY") || readKey(env, "FIREFLY_API_KEY"),
+      openRouter: fromEnv("OPENROUTER_API") || fromEnv("OPENROUTER_API_KEY") || readKey(env, "OPENROUTER_API") || readKey(env, "OPENROUTER_API_KEY"),
+      appSecret: fromEnv("FIREFLIES_APP_SECRET") || readKey(env, "FIREFLIES_APP_SECRET"),
+      allowedTailscaleLogins: new Set(policy("FIREFLIES_ALLOWED_TAILSCALE_LOGINS").split(",").map(value => value.trim().toLowerCase()).filter(Boolean)),
+      allowedProcessors: new Set(policy("FIREFLIES_ALLOWED_DATA_PROCESSORS").split(",").map(value => value.trim().toLowerCase()).filter(Boolean)),
     };
   };
   const auth = createSessionAuth({

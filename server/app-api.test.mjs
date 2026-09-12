@@ -217,3 +217,150 @@ test("production auth and provider policy fail closed when deployment config is 
     assert.equal((await fetch(`${policyBase}/api/ai/chat`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: "anthropic/test", messages: [{ role: "user", content: "no" }] }) })).status, 403);
   } finally { await new Promise(resolve => policyServer.close(resolve)); }
 });
+
+// ── 1Password Phase 6: secrets from the environment (oprun), op:// never a value,
+//    policy lists re-read from the file on every request ──────────────────────
+
+async function withApi(options, fn) {
+  const api = createAppApi({ bridgeToken: "", recordsDir: dir, meetingStore, ...options });
+  const srv = http.createServer((req, res) => { if (!api(req, res)) { res.writeHead(404); res.end(); } });
+  await new Promise(resolve => srv.listen(0, "127.0.0.1", resolve));
+  try { return await fn(`http://127.0.0.1:${srv.address().port}`); }
+  finally { await new Promise(resolve => srv.close(resolve)); }
+}
+
+async function withEnv(values, fn) {
+  const saved = Object.fromEntries(Object.keys(values).map(name => [name, process.env[name]]));
+  Object.assign(process.env, values);
+  try { return await fn(); }
+  finally { for (const [name, value] of Object.entries(saved)) { if (value === undefined) delete process.env[name]; else process.env[name] = value; } }
+}
+
+function recordingFetch() {
+  const calls = [];
+  const fetchImpl = async (url, options = {}) => {
+    calls.push({ url: String(url), options });
+    return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "Content-Type": "application/json" } });
+  };
+  return { calls, fetchImpl };
+}
+
+const chat = (base, headers = {}) => fetch(`${base}/api/ai/chat`, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify({ model: "anthropic/test", messages: [{ role: "user", content: "hi" }] }) });
+const robinSession = async base => (await fetch(`${base}/api/auth/session`, { method: "POST", headers: { "Content-Type": "application/json", "Tailscale-User-Login": "robin@thrivbe.com" }, body: "{}" }));
+
+test("op:// addresses in the keys file are never used as credentials", async () => {
+  const opEnv = path.join(dir, "op-addresses.env");
+  await writeFile(opEnv, "FIREFLY_API_KEY=op://Vault/Fireflies/credential\nOPENROUTER_API_KEY=\"op://Vault/OpenRouter/credential\"\nFIREFLIES_ALLOWED_DATA_PROCESSORS=fireflies,openrouter\n");
+  const { calls, fetchImpl } = recordingFetch();
+  const realtimeCalls = [];
+  await withApi({ envFile: opEnv, fetchImpl, realtime: async (...args) => { realtimeCalls.push(args); throw new Error("must not connect"); } }, async base => {
+    assert.deepEqual(await (await fetch(`${base}/api/config`)).json(), { firefliesAvailable: false, openRouterAvailable: false, bridgeAvailable: false, providerPolicyConfigured: true, blockedProviders: [] });
+    assert.equal((await fetch(`${base}/api/fireflies/meetings`)).status, 503);
+    assert.equal((await fetch(`${base}/api/fireflies/live?meetingId=meeting-1`)).status, 400);
+    assert.equal((await chat(base)).status, 503);
+  });
+  assert.equal(calls.length, 0);
+  assert.equal(realtimeCalls.length, 0);
+});
+
+test("an unresolved op:// value in the environment is never used either", async () => {
+  const plainEnv = path.join(dir, "plain-with-op-env.env");
+  await writeFile(plainEnv, `FIREFLY_API_KEY=${FIREFLIES_SECRET}\nFIREFLIES_ALLOWED_DATA_PROCESSORS=fireflies,openrouter\n`);
+  const { calls, fetchImpl } = recordingFetch();
+  await withEnv({ FIREFLY_API_KEY: "op://Vault/Fireflies/credential", OPENROUTER_API_KEY: "op://Vault/OpenRouter/credential" }, () =>
+    withApi({ envFile: plainEnv, fetchImpl }, async base => {
+      const config = await (await fetch(`${base}/api/config`)).json();
+      assert.equal(config.firefliesAvailable, true); // falls back to the plaintext file value
+      assert.equal(config.openRouterAvailable, false); // no real value anywhere
+      assert.equal((await fetch(`${base}/api/fireflies/meetings`)).status, 200);
+      assert.equal((await chat(base)).status, 503);
+    }));
+  assert.deepEqual(calls.map(call => call.options.headers.Authorization), [`Bearer ${FIREFLIES_SECRET}`]);
+});
+
+test("an op:// app secret with nothing resolved leaves production auth unconfigured", async () => {
+  const opEnv = path.join(dir, "op-app-secret.env");
+  await writeFile(opEnv, "FIREFLIES_APP_SECRET=op://Vault/AppSecret/credential\nFIREFLIES_ALLOWED_TAILSCALE_LOGINS=robin@thrivbe.com\n");
+  await withApi({ envFile: opEnv, requireAuth: true }, async base => {
+    assert.deepEqual(await (await fetch(`${base}/api/auth/status`)).json(), { required: true, configured: false, authenticated: false });
+    assert.equal((await robinSession(base)).status, 503);
+    assert.equal((await fetch(`${base}/api/config`)).status, 503);
+  });
+});
+
+test("secrets resolved into the environment (oprun) win over op:// addresses in the file", async () => {
+  const opEnv = path.join(dir, "op-switched.env");
+  await writeFile(opEnv, "FIREFLY_API_KEY=op://Vault/Fireflies/credential\nOPENROUTER_API_KEY=op://Vault/OpenRouter/credential\nFIREFLIES_APP_SECRET=op://Vault/AppSecret/credential\nFIREFLIES_ALLOWED_TAILSCALE_LOGINS=robin@thrivbe.com\nFIREFLIES_ALLOWED_DATA_PROCESSORS=fireflies,openrouter\n");
+  const { calls, fetchImpl } = recordingFetch();
+  await withEnv({ FIREFLY_API_KEY: "ff-env-canary", OPENROUTER_API_KEY: "or-env-canary", FIREFLIES_APP_SECRET: "app-env-canary" }, () =>
+    withApi({ envFile: opEnv, fetchImpl, requireAuth: true }, async base => {
+      assert.deepEqual(await (await fetch(`${base}/api/auth/status`)).json(), { required: true, configured: true, authenticated: false });
+      const session = await robinSession(base);
+      assert.equal(session.status, 200);
+      const cookie = session.headers.get("set-cookie");
+      const config = await fetch(`${base}/api/config`, { headers: { Cookie: cookie } });
+      const text = await config.text();
+      assert.equal(JSON.parse(text).firefliesAvailable, true);
+      assert.equal(JSON.parse(text).openRouterAvailable, true);
+      for (const secret of ["ff-env-canary", "or-env-canary", "app-env-canary"]) assert.ok(!text.includes(secret));
+      assert.equal((await fetch(`${base}/api/fireflies/meetings`, { headers: { Cookie: cookie } })).status, 200);
+      assert.equal((await chat(base, { Cookie: cookie })).status, 200);
+    }));
+  assert.deepEqual(calls.map(call => call.options.headers.Authorization), ["Bearer ff-env-canary", "Bearer or-env-canary"]);
+});
+
+test("a real secret in the environment wins over a real one in the file (unchanged precedence)", async () => {
+  const plainEnv = path.join(dir, "both-real.env");
+  await writeFile(plainEnv, "FIREFLY_API_KEY=ff-file-canary\nOPENROUTER_API_KEY=or-file-canary\nFIREFLIES_ALLOWED_DATA_PROCESSORS=fireflies,openrouter\n");
+  const { calls, fetchImpl } = recordingFetch();
+  await withEnv({ FIREFLY_API_KEY: "ff-env-canary", OPENROUTER_API_KEY: "or-env-canary" }, () =>
+    withApi({ envFile: plainEnv, fetchImpl }, async base => {
+      assert.equal((await fetch(`${base}/api/fireflies/meetings`)).status, 200);
+      assert.equal((await chat(base)).status, 200);
+    }));
+  assert.deepEqual(calls.map(call => call.options.headers.Authorization), ["Bearer ff-env-canary", "Bearer or-env-canary"]);
+});
+
+test("provider policy is re-read from the file on every request, even when the environment also holds it", async () => {
+  const policyEnv = path.join(dir, "policy-reload.env");
+  const writePolicy = line => writeFile(policyEnv, `FIREFLY_API_KEY=${FIREFLIES_SECRET}\nOPENROUTER_API=${OPENROUTER_SECRET}\n${line}`);
+  const blocked = async base => (await (await fetch(`${base}/api/config`)).json()).blockedProviders;
+  const { fetchImpl } = recordingFetch();
+  await writePolicy("FIREFLIES_ALLOWED_DATA_PROCESSORS=fireflies,openrouter\n");
+  // oprun exports plaintext lines into the environment at start; that copy must not freeze the policy.
+  await withEnv({ FIREFLIES_ALLOWED_DATA_PROCESSORS: "fireflies,openrouter" }, () =>
+    withApi({ envFile: policyEnv, fetchImpl }, async base => {
+      assert.deepEqual(await blocked(base), []);
+      await writePolicy("FIREFLIES_ALLOWED_DATA_PROCESSORS=fireflies\n");
+      assert.deepEqual(await blocked(base), ["openrouter"]);
+      assert.equal((await chat(base)).status, 403);
+      await writePolicy(""); // line removed: everything is blocked, the environment copy does not re-grant
+      assert.deepEqual(await blocked(base), ["fireflies", "openrouter"]);
+      await writePolicy("FIREFLIES_ALLOWED_DATA_PROCESSORS=fireflies,openrouter\n");
+      assert.deepEqual(await blocked(base), []);
+    }));
+});
+
+test("the Tailscale login allowlist is re-read from the file: removing a login revokes its live session", async () => {
+  const authEnv = path.join(dir, "login-reload.env");
+  const writeLogins = logins => writeFile(authEnv, `FIREFLIES_APP_SECRET=private-robin-secret\nFIREFLIES_ALLOWED_TAILSCALE_LOGINS=${logins}\nFIREFLIES_ALLOWED_DATA_PROCESSORS=fireflies\n`);
+  await writeLogins("robin@thrivbe.com");
+  await withEnv({ FIREFLIES_ALLOWED_TAILSCALE_LOGINS: "robin@thrivbe.com" }, () =>
+    withApi({ envFile: authEnv, requireAuth: true }, async base => {
+      const cookie = (await robinSession(base)).headers.get("set-cookie");
+      assert.equal((await fetch(`${base}/api/config`, { headers: { Cookie: cookie } })).status, 200);
+      await writeLogins("someone-else@thrivbe.com");
+      assert.equal((await fetch(`${base}/api/config`, { headers: { Cookie: cookie } })).status, 401);
+      assert.equal((await robinSession(base)).status, 403);
+    }));
+});
+
+test("policy comes from the environment only when the keys file is unreadable", async () => {
+  const { fetchImpl } = recordingFetch();
+  await withEnv({ FIREFLY_API_KEY: "ff-env-canary", FIREFLIES_ALLOWED_DATA_PROCESSORS: "fireflies" }, () =>
+    withApi({ envFile: path.join(dir, "does-not-exist.env"), fetchImpl }, async base => {
+      const config = await (await fetch(`${base}/api/config`)).json();
+      assert.equal(config.firefliesAvailable, true);
+      assert.equal(config.providerPolicyConfigured, true);
+    }));
+});

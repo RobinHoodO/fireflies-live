@@ -25,11 +25,15 @@ const FOREIGN = /[\p{sc=Cyrillic}\p{sc=Greek}\p{sc=Arabic}\p{sc=Hebrew}\p{sc=Han
 const GARBLED_RATIO = 0.3;
 
 function key() {
-  if (process.env.FIREFLY_API_KEY) return process.env.FIREFLY_API_KEY;
+  // 1Password Phase 6: environment first (oprun), plaintext file fallback, never an op:// address.
+  const fromEnv = process.env.FIREFLY_API_KEY;
+  if (fromEnv && !fromEnv.startsWith("op://")) return fromEnv;
   const env = fs.readFileSync(ENV_FILE, "utf8");
   const m = env.match(/^FIREFLY_API_KEY=(.*)$/m);
   if (!m) throw new Error(`FIREFLY_API_KEY not in ${ENV_FILE}`);
-  return m[1].trim().replace(/^["']|["']$/g, "").trim();
+  const value = m[1].trim().replace(/^["']|["']$/g, "").trim();
+  if (value.startsWith("op://")) throw new Error(`FIREFLY_API_KEY in ${ENV_FILE} is a 1Password address; run: oprun --env-file ${ENV_FILE} -- node server/langcheck.mjs`);
+  return value;
 }
 
 // Per-speaker: how many of their turns came out in a foreign script.

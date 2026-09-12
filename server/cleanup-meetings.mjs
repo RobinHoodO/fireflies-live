@@ -12,7 +12,8 @@ const fileEnv = {};
 try {
   for (const line of readFileSync(envFile, "utf8").split("\n")) {
     const match = /^([A-Z0-9_]+)=(.*)$/.exec(line.trim());
-    if (match) fileEnv[match[1]] = match[2].trim().replace(/^['"]|['"]$/g, "");
+    const value = match ? match[2].trim().replace(/^['"]|['"]$/g, "") : "";
+    if (match && !value.startsWith("op://")) fileEnv[match[1]] = value; // never use a 1Password address as a value
   }
 } catch { /* process environment remains authoritative */ }
 
