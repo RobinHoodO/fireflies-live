@@ -34,6 +34,8 @@ FIREFLIES_ALLOWED_DATA_PROCESSORS=fireflies
 FIREFLIES_FINAL_RETENTION_DAYS=90
 ```
 
+On Thrivbe-1 the three secrets (`FIREFLY_API_KEY`, `OPENROUTER_API_KEY`, `FIREFLIES_APP_SECRET`) come from 1Password: a systemd drop-in starts the server through `oprun`, which resolves them once at start into the environment, and the environment wins over the file. A value starting with `op://` is never used from either place. The `FIREFLIES_ALLOWED_*` policy lines stay plaintext in `SERVE_ENV_FILE` and are re-read on every request, so editing them still grants or revokes with no restart. Install, proof and revert: [`deploy/README.md`](deploy/README.md).
+
 `FIREFLIES_APP_SECRET` never enters the browser. Tailscale Serve strips spoofed identity headers and supplies the authenticated login; only an explicitly allowed login can exchange that identity for the short-lived application session. The processor allowlist is an operational acknowledgement, not a vendor-policy decision made by this repository. Omit a provider until Robin has accepted its data handling; the UI will show the blocked capability. `FIREFLIES_APP_COOKIE_SECURE=1` is mandatory for the approved HTTPS production path; a plain-HTTP deployment cannot use the production policy.
 
 The approved production path is `https://hetzner.tail9908c7.ts.net:8453/`, terminated by Tailscale Serve and available only inside Robin's tailnet. The application backend binds `127.0.0.1:3017`; direct tailnet-IP HTTP access is intentionally removed. The current processor policy is `fireflies` only: Fireflies remains the inbound transcript source, while OpenRouter and every external AI transcript processor remain blocked.

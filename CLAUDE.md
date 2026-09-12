@@ -68,6 +68,15 @@ Keys live in `/Users/robinsverd/Thrivbe-AI/.env`: `FIREFLY_API_KEY` (the
 Fireflies token, despite the name) and `OPENROUTER_API`. The dev middleware
 (`/api/fireflies-key`) injects them; never hardcode or paste values.
 
+Production (Thrivbe-1, 1Password Phase 6): `FIREFLY_API_KEY`, `OPENROUTER_API_KEY`
+and `FIREFLIES_APP_SECRET` come from 1Password through an `oprun` systemd drop-in,
+resolved once at start. The environment wins over `SERVE_ENV_FILE`, and an `op://`
+value is never used from either. The `FIREFLIES_ALLOWED_*` policy lines stay
+plaintext in `SERVE_ENV_FILE` and are re-read on every request, so editing them
+grants or revokes live. Rotating a secret means changing it in 1Password, then
+restarting the unit (which logs Robin out). The bridge child never inherits the
+three secrets. Install, proof and revert: `deploy/README.md`.
+
 ## Conventions
 
 - Inline-style objects everywhere in v2 — design-port convention, not a

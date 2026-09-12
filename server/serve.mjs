@@ -7,6 +7,9 @@
 //      SERVE_HOSTS (allowed Host headers, comma-separated, required),
 //      SERVE_ENV_FILE (keys file, default /opt/Thrivbe-AI/.env),
 //      FIREFLIES_APP_SECRET (required Robin-only login secret).
+// Secrets (FIREFLY_API_KEY, OPENROUTER_API_KEY, FIREFLIES_APP_SECRET) come from the
+// environment first (oprun, see deploy/README.md), else SERVE_ENV_FILE; an op:// value
+// is never used. The FIREFLIES_ALLOWED_* policy lists are re-read from the file per request.
 
 import http from "node:http";
 import { spawn } from "node:child_process";
@@ -38,13 +41,22 @@ export function safeDistPath(urlPath, dist = DIST) {
   return full === dist || full.startsWith(`${dist}${path.sep}`) ? full : "";
 }
 
+// Provider credentials stay in this process. Under oprun they sit in process.env,
+// and the bridge (which forwards OPENROUTER_* to its /pi child) must not inherit
+// them — it only needs BRIDGE_*. Returns a new object; the input is not touched.
+export const SERVER_ONLY_ENV = new Set(["FIREFLY_API_KEY", "OPENROUTER_API", "OPENROUTER_API_KEY", "FIREFLIES_APP_SECRET"]);
+export function bridgeEnv(env, bridgeToken) {
+  const kept = Object.entries(env).filter(([name]) => !SERVER_ONLY_ENV.has(name));
+  return { ...Object.fromEntries(kept), BRIDGE_TOKEN: bridgeToken };
+}
+
 // ── main (skipped when imported by tests) ───────────────────────────────────
 if (process.env.SERVE_TEST !== "1") {
   if (ALLOWED_HOSTS.length === 0) { console.error("[serve] SERVE_HOSTS is required"); process.exit(1); }
 
   // Per-boot shared secret between the server API and bridge, same as dev.
   const bridgeToken = randomUUID();
-  const bridge = spawn("node", [path.resolve(__dirname, "bridge.mjs")], { stdio: "inherit", env: { ...process.env, BRIDGE_TOKEN: bridgeToken } });
+  const bridge = spawn("node", [path.resolve(__dirname, "bridge.mjs")], { stdio: "inherit", env: bridgeEnv(process.env, bridgeToken) });
   const api = createAppApi({
     envFile: ENV_FILE,
     bridgeToken,

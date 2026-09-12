@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 process.env.SERVE_TEST = "1";
-const { hostAllowed, safeDistPath } = await import("./serve.mjs");
+const { hostAllowed, safeDistPath, bridgeEnv } = await import("./serve.mjs");
 
 const DIST = "/srv/app/dist";
 
@@ -26,4 +26,13 @@ test("static paths stay inside dist", () => {
     const resolved = safeDistPath(attack, DIST);
     assert.ok(resolved === "" || resolved.startsWith(`${DIST}/`), `${attack} → ${resolved}`);
   }
+});
+
+test("provider secrets resolved by oprun never reach the bridge child's environment", () => {
+  const env = {
+    PATH: "/usr/bin", HOME: "/root", BRIDGE_FILE_DIR: "/srv/transcripts", BRIDGE_TOKEN: "stale",
+    FIREFLY_API_KEY: "ff-canary", OPENROUTER_API: "or-canary-1", OPENROUTER_API_KEY: "or-canary-2", FIREFLIES_APP_SECRET: "app-canary",
+  };
+  assert.deepEqual(bridgeEnv(env, "boot-token"), { PATH: "/usr/bin", HOME: "/root", BRIDGE_FILE_DIR: "/srv/transcripts", BRIDGE_TOKEN: "boot-token" });
+  assert.equal(env.FIREFLY_API_KEY, "ff-canary"); // the server's own environment is not mutated
 });
