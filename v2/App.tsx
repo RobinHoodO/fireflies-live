@@ -15,11 +15,12 @@ import {
 import {
   fetchKeys, fetchMeetings, callAI, fetchFeed, fetchGraph, streamLiveAnswer, streamPI, proposeModes,
   connectLive, connectDemo, fileMeeting, checkpointMeeting, beaconMeetingCheckpoint, listInterruptedMeetings, recoverInterruptedMeeting, discardInterruptedMeeting,
-  fetchNavFrame, fetchSentiment, fetchContext, AGENDA_TYPES, FEED_TYPES, MODE_CONTEXT,
+  fetchNavFrame, fetchSentiment, fetchContext, fetchTurnProbability, AGENDA_TYPES, FEED_TYPES, MODE_CONTEXT,
   type Meeting, type InterruptedMeeting, type ConnStatus, type NavFrame, type SentimentPoint, type Constellation, type FeedType, type FeedResult,
 } from "./backend";
 import { packSession, unpackSession, shouldAutoResume } from "./session";
 import { prioritize, applyOrder, sortFeed, matchesFilter, anchorFor, isOpenPossibility, isNearDupe, garbledSpeakers, transcriptContext, POSSIBILITY_TYPES, FEED_SORTS, type FeedItem, type FeedSort } from "./feed";
+import { shouldConsultJev, clearsTurnBar } from "./turn";
 import { layoutMycelium, pathToRoot, graftOrphans, wrapLabel, hostNodeId, wobbleOf, GRAPH_STATES, type GraphNode } from "./graph";
 
 // Persisted UI config — survives reloads / new sessions (localStorage).
@@ -38,9 +39,9 @@ const GREETING_PI: Message = { id: 0, role: "agent", text: "● **Command interf
 
 type Line = { speaker: string; text: string; isFinal: boolean; id: string };
 
-const SETTINGS_FLAGS = [...FLAGS, { k: "agenda", l: "Dynamic agenda" }, { k: "graph", l: "Conversation map (experiment)" }, { k: "calm", l: "Calm cue" }];
+const SETTINGS_FLAGS = [...FLAGS, { k: "agenda", l: "Dynamic agenda" }, { k: "graph", l: "Conversation map (experiment)" }, { k: "calm", l: "Calm cue" }, { k: "jev", l: "Jev turn trigger (experiment)" }];
 const restoredFlags = () => {
-  const defaults: Record<string, boolean> = { autosuggest: true, sentiment: true, actions: false, speakers: true, agenda: true, graph: true, calm: true };
+  const defaults: Record<string, boolean> = { autosuggest: true, sentiment: true, actions: false, speakers: true, agenda: true, graph: true, calm: true, jev: false };
   for (const { k } of SETTINGS_FLAGS) if (typeof SAVED.flags?.[k] === "boolean") defaults[k] = SAVED.flags[k];
   return defaults;
 };
@@ -147,6 +148,7 @@ export default function App() {
 
   // backend state
   const [ffKey, setFfKey] = useState(""); const [orKey, setOrKey] = useState(""); const [bridgeToken, setBridgeToken] = useState("");
+  const [jevAvailable, setJevAvailable] = useState(false);
   const [bridgeOnline, setBridgeOnline] = useState(false);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(() => SESSION.selectedMeeting && typeof SESSION.selectedMeeting === "object" && typeof SESSION.selectedMeeting.id === "string" ? SESSION.selectedMeeting : null);
@@ -187,8 +189,13 @@ export default function App() {
   // never mint a duplicate id (duplicate React keys silently drop rows).
   const lastSpeakerRef = useRef(""); const lineCounter = useRef(lines.reduce((max, l) => { const m = /^l(\d+)$/.exec(l.id); return m ? Math.max(max, Number(m[1])) : max; }, 0)); const lastFeedRef = useRef(0); const feedSeqRef = useRef(0); const lastAnswerRef = useRef(0);
   const feedRef = useRef<FeedItem[]>([]); feedRef.current = feed;
+  const linesRef = useRef<Line[]>([]); linesRef.current = lines;
   const answerSeqRef = useRef(0);
   const answerAbortRef = useRef<AbortController | null>(null);
+  // Jev turn-trigger: throttle the last call, and never re-consult for the
+  // same final line twice.
+  const lastJevCallRef = useRef(0);
+  const jevLastLineIdRef = useRef("");
   const piAbortRef = useRef<AbortController | null>(null);
   const lastNavRef = useRef(0); const navSeqRef = useRef(0);
   const lastSentimentRef = useRef(0); const sentimentSeqRef = useRef(0);
@@ -285,7 +292,7 @@ export default function App() {
   useLayoutEffect(() => { stickPiPanel(); }, [piMessages, piThinking, stickPiPanel]);
 
   // ── boot: keys, meetings, bridge health ──────────────────────────
-  useEffect(() => { fetchKeys().then(k => { setFfKey(k.ffKey); setOrKey(k.orKey); setBridgeToken(k.bridgeToken); setProviderPolicyError(k.providerPolicyError); }); }, []);
+  useEffect(() => { fetchKeys().then(k => { setFfKey(k.ffKey); setOrKey(k.orKey); setBridgeToken(k.bridgeToken); setJevAvailable(k.jevAvailable); setProviderPolicyError(k.providerPolicyError); }); }, []);
   useEffect(() => { listInterruptedMeetings().then(setInterrupted); }, []);
   const loadMeetings = useCallback(async () => {
     if (!ffKey) return; setLoadingMeetings(true); setMeetingsError("");
@@ -393,40 +400,63 @@ export default function App() {
   useEffect(() => {
     if (!questionMode || !orKey || lines.length === 0) { answerSeqRef.current++; answerAbortRef.current?.abort(); answerAbortRef.current = null; setAnswering(false); return; }
     if (isFollowingScript(scriptPointerRef.current, missStreakRef.current, scriptWordsRef.current.length)) return;
+    const lastLine = lines[lines.length - 1];
     // Don't redraft while Robin is the one talking — the draft is for when the
     // other side hands the turn back to him.
-    if (liveAnswerRef.current && ["you", resolvedHost.toLowerCase()].includes(lines[lines.length - 1]?.speaker.trim().toLowerCase())) return;
+    if (liveAnswerRef.current && ["you", resolvedHost.toLowerCase()].includes(lastLine?.speaker.trim().toLowerCase())) return;
+    // Draft now, reading the freshest transcript at the moment it actually
+    // fires — Jev's answer can land a beat after this effect ran.
+    const fire = () => {
+      lastAnswerRef.current = Date.now();
+      const ctx = transcriptContext(linesRef.current, 40);
+      const prev = liveAnswerRef.current;
+      const seq = ++answerSeqRef.current;
+      answerAbortRef.current?.abort(); // stop the superseded stream's network work
+      const controller = new AbortController();
+      answerAbortRef.current = controller;
+      setAnswering(true);
+      streamLiveAnswer(ctx, orKey, pulseContext, fastModel, prev, partial => {
+        if (seq !== answerSeqRef.current) return;
+        // Only stream into view for the FIRST draft. Once a draft is on screen,
+        // the replacement is assembled off-screen and swapped in whole — a
+        // half-written line replacing a readable one is the "jumping" Robin saw.
+        if (prev) return;
+        const p = partial.trim();
+        if (p && p !== "—") setLiveAnswer(p);
+      }, controller.signal).then(final => {
+        if (seq !== answerSeqRef.current) return;
+        const f = (final || "").trim();
+        if (!f || f === "—") setLiveAnswer(prev); // nothing to say right now — keep the last draft, don't vanish
+        else if (f === prev) { /* draft still stands — keep it and its karaoke progress */ }
+        else {
+          setLiveAnswer(f); liveAnswerRef.current = f;
+          scriptWordsRef.current = normalizedWords(f); scriptPointerRef.current = 0; missStreakRef.current = 0;
+          setScriptPointer(prev => prev === 0 ? prev : 0); setMissStreak(prev => prev === 0 ? prev : 0);
+        }
+        setAnswering(false);
+      }).catch(() => { if (seq === answerSeqRef.current) setAnswering(false); }); // AbortError lands here silently
+    };
     const now = Date.now();
-    if (now - lastAnswerRef.current < SAY_MIN_GAP_MS) return;
-    lastAnswerRef.current = now;
-    const ctx = transcriptContext(lines, 40);
-    const prev = liveAnswerRef.current;
-    const seq = ++answerSeqRef.current;
-    answerAbortRef.current?.abort(); // stop the superseded stream's network work
-    const controller = new AbortController();
-    answerAbortRef.current = controller;
-    setAnswering(true);
-    streamLiveAnswer(ctx, orKey, pulseContext, fastModel, prev, partial => {
-      if (seq !== answerSeqRef.current) return;
-      // Only stream into view for the FIRST draft. Once a draft is on screen,
-      // the replacement is assembled off-screen and swapped in whole — a
-      // half-written line replacing a readable one is the "jumping" Robin saw.
-      if (prev) return;
-      const p = partial.trim();
-      if (p && p !== "—") setLiveAnswer(p);
-    }, controller.signal).then(final => {
-      if (seq !== answerSeqRef.current) return;
-      const f = (final || "").trim();
-      if (!f || f === "—") setLiveAnswer(prev); // nothing to say right now — keep the last draft, don't vanish
-      else if (f === prev) { /* draft still stands — keep it and its karaoke progress */ }
-      else {
-        setLiveAnswer(f); liveAnswerRef.current = f;
-        scriptWordsRef.current = normalizedWords(f); scriptPointerRef.current = 0; missStreakRef.current = 0;
-        setScriptPointer(prev => prev === 0 ? prev : 0); setMissStreak(prev => prev === 0 ? prev : 0);
-      }
-      setAnswering(false);
-    }).catch(() => { if (seq === answerSeqRef.current) setAnswering(false); }); // AbortError lands here silently
-  }, [lines, questionMode, orKey, pulseContext, fastModel, redraftTick]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (now - lastAnswerRef.current >= SAY_MIN_GAP_MS) { fire(); return; }
+    // The 25s floor hasn't elapsed — Jev is an EARLY EXIT from it, never a new
+    // delay: it only ever brings a draft forward, it can't push one back.
+    if (!flags.jev || !jevAvailable) return;
+    const hostSpokeLast = ["you", resolvedHost.toLowerCase()].includes(lastLine?.speaker.trim().toLowerCase());
+    const hasNewFinalLine = !!lastLine && lastLine.isFinal && lastLine.id !== jevLastLineIdRef.current;
+    if (!shouldConsultJev({ hasNewFinalLine, lastSpeakerIsHost: hostSpokeLast, now, lastJevCallAt: lastJevCallRef.current })) return;
+    jevLastLineIdRef.current = lastLine.id;
+    lastJevCallRef.current = now;
+    const consultedLineId = lastLine.id;
+    const consultedAnswerSeq = answerSeqRef.current;
+    fetchTurnProbability(transcriptContext(linesRef.current, 40)).then(p => {
+      if (!clearsTurnBar(p)) return; // no answer, or not a clear yes — the timer still owns this
+      // Stale guard: bail if a real draft already fired, or the transcript
+      // moved past the line Jev was asked about.
+      if (answerSeqRef.current !== consultedAnswerSeq) return;
+      if (linesRef.current[linesRef.current.length - 1]?.id !== consultedLineId) return;
+      fire();
+    });
+  }, [lines, questionMode, orKey, pulseContext, fastModel, redraftTick, flags.jev, jevAvailable]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── navigator situation frame ───────────────────────────────────
   const runNav = async () => {
@@ -594,6 +624,7 @@ export default function App() {
     setGraph([]); setGraphCurrent(null); setPickedNode(null); graphSeqRef.current++; lastGraphRef.current = 0; graphIdRef.current = 1;
     navSeqRef.current++; feedSeqRef.current++; sentimentSeqRef.current++;
     setNavBusy(false); lastNavRef.current = 0; lastSentimentRef.current = 0; lastFeedRef.current = 0; lastAnswerRef.current = 0; sidRef.current = 1;
+    lastJevCallRef.current = 0; jevLastLineIdRef.current = "";
     liveAnswerRef.current = ""; scriptWordsRef.current = []; consumedTranscriptWordsRef.current.clear(); scriptPointerRef.current = 0; missStreakRef.current = 0;
     setScriptPointer(prev => prev === 0 ? prev : 0); setMissStreak(prev => prev === 0 ? prev : 0);
     lastSpeakerRef.current = ""; lineCounter.current = 0;
