@@ -81,7 +81,7 @@ test("browser config exposes capabilities, never raw credentials", async () => {
   const response = await fetch(`${base}/api/config`);
   assert.equal(response.status, 200);
   const text = await response.text();
-  assert.deepEqual(JSON.parse(text), { firefliesAvailable: true, openRouterAvailable: true, bridgeAvailable: true, providerPolicyConfigured: true, blockedProviders: [] });
+  assert.deepEqual(JSON.parse(text), { firefliesAvailable: true, openRouterAvailable: true, jevAvailable: false, bridgeAvailable: true, providerPolicyConfigured: true, blockedProviders: [] });
   for (const secret of [FIREFLIES_SECRET, OPENROUTER_SECRET, BRIDGE_SECRET]) assert.ok(!text.includes(secret));
 });
 
@@ -254,7 +254,7 @@ test("op:// addresses in the keys file are never used as credentials", async () 
   const { calls, fetchImpl } = recordingFetch();
   const realtimeCalls = [];
   await withApi({ envFile: opEnv, fetchImpl, realtime: async (...args) => { realtimeCalls.push(args); throw new Error("must not connect"); } }, async base => {
-    assert.deepEqual(await (await fetch(`${base}/api/config`)).json(), { firefliesAvailable: false, openRouterAvailable: false, bridgeAvailable: false, providerPolicyConfigured: true, blockedProviders: [] });
+    assert.deepEqual(await (await fetch(`${base}/api/config`)).json(), { firefliesAvailable: false, openRouterAvailable: false, jevAvailable: false, bridgeAvailable: false, providerPolicyConfigured: true, blockedProviders: [] });
     assert.equal((await fetch(`${base}/api/fireflies/meetings`)).status, 503);
     assert.equal((await fetch(`${base}/api/fireflies/live?meetingId=meeting-1`)).status, 400);
     assert.equal((await chat(base)).status, 503);
@@ -363,4 +363,97 @@ test("policy comes from the environment only when the keys file is unreadable", 
       assert.equal(config.firefliesAvailable, true);
       assert.equal(config.providerPolicyConfigured, true);
     }));
+});
+
+// ── Jev (TypeSafe System One) turn-trigger: /api/jev/turn ───────────────────
+// New external data processor seeing meeting text — gated behind the same
+// allowlist as fireflies/openrouter, and it must never surface a raw key,
+// transcript, or probability failure as a hard error to the browser.
+
+const jevTurn = (base, headers = {}) => fetch(`${base}/api/jev/turn`, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify({ transcript: "[Robin]: hi\n[Max]: what do you think?" }) });
+
+test("Jev is blocked until typesafe joins the data processor allowlist, even with a key present", async () => {
+  const jevEnv = path.join(dir, "jev-unapproved.env");
+  await writeFile(jevEnv, "TYPESAFE_API_KEY=jev-secret-canary\nFIREFLIES_ALLOWED_DATA_PROCESSORS=fireflies,openrouter\n");
+  await withApi({ envFile: jevEnv }, async base => {
+    const config = await (await fetch(`${base}/api/config`)).json();
+    assert.equal(config.jevAvailable, false);
+    assert.deepEqual(config.blockedProviders, ["typesafe"]);
+    assert.equal((await jevTurn(base)).status, 403);
+  });
+});
+
+test("Jev is unavailable when approved but no key resolves anywhere", async () => {
+  const jevEnv = path.join(dir, "jev-no-key.env");
+  await writeFile(jevEnv, "FIREFLIES_ALLOWED_DATA_PROCESSORS=fireflies,openrouter,typesafe\n");
+  await withApi({ envFile: jevEnv }, async base => {
+    assert.equal((await (await fetch(`${base}/api/config`)).json()).jevAvailable, false);
+    assert.equal((await jevTurn(base)).status, 503);
+  });
+});
+
+test("an approved, keyed Jev call authenticates upstream and returns only the probability", async () => {
+  const JEV_SECRET = "jev-secret-canary";
+  const jevEnv = path.join(dir, "jev-ok.env");
+  await writeFile(jevEnv, `TYPESAFE_API_KEY=${JEV_SECRET}\nFIREFLIES_ALLOWED_DATA_PROCESSORS=fireflies,openrouter,typesafe\n`);
+  const calls = [];
+  const fetchImpl = async (url, options = {}) => {
+    calls.push({ url: String(url), options });
+    return new Response(JSON.stringify({ answers: { turn_to_host: { noul: 0.92 } } }), { status: 200, headers: { "Content-Type": "application/json" } });
+  };
+  await withApi({ envFile: jevEnv, fetchImpl }, async base => {
+    assert.equal((await (await fetch(`${base}/api/config`)).json()).jevAvailable, true);
+    const response = await jevTurn(base);
+    assert.equal(response.status, 200);
+    const text = await response.text();
+    assert.deepEqual(JSON.parse(text), { ok: true, p: 0.92 });
+    assert.ok(!text.includes(JEV_SECRET));
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, "https://api.typesafe.ai/v1/systemone");
+  assert.equal(calls[0].options.headers.Authorization, `Bearer ${JEV_SECRET}`);
+  const sentBody = JSON.parse(calls[0].options.body);
+  assert.equal(sentBody.model, "jev-latest");
+  assert.equal(sentBody.state, "[Robin]: hi\n[Max]: what do you think?");
+  assert.equal(sentBody.questions.turn_to_host.type, "noul");
+});
+
+test("Jev upstream failure, a non-2xx, and a garbage body all degrade to ok:false without a 5xx", async () => {
+  const jevEnv = path.join(dir, "jev-degrade.env");
+  await writeFile(jevEnv, "TYPESAFE_API_KEY=jev-secret-canary\nFIREFLIES_ALLOWED_DATA_PROCESSORS=fireflies,openrouter,typesafe\n");
+
+  await withApi({ envFile: jevEnv, fetchImpl: async () => { throw new Error("network unreachable"); } }, async base => {
+    const r = await jevTurn(base);
+    assert.equal(r.status, 200);
+    assert.deepEqual(await r.json(), { ok: false });
+  });
+
+  await withApi({ envFile: jevEnv, fetchImpl: async () => new Response("rate limited", { status: 429 }) }, async base => {
+    const r = await jevTurn(base);
+    assert.equal(r.status, 200);
+    assert.deepEqual(await r.json(), { ok: false });
+  });
+
+  await withApi({ envFile: jevEnv, fetchImpl: async () => new Response("not json", { status: 200, headers: { "Content-Type": "text/plain" } }) }, async base => {
+    const r = await jevTurn(base);
+    assert.equal(r.status, 200);
+    assert.deepEqual(await r.json(), { ok: false });
+  });
+
+  await withApi({ envFile: jevEnv, fetchImpl: async () => new Response(JSON.stringify({ answers: {} }), { status: 200, headers: { "Content-Type": "application/json" } }) }, async base => {
+    const r = await jevTurn(base);
+    assert.equal(r.status, 200);
+    assert.deepEqual(await r.json(), { ok: false });
+  });
+});
+
+test("an empty transcript is rejected before any upstream call", async () => {
+  const jevEnv = path.join(dir, "jev-empty.env");
+  await writeFile(jevEnv, "TYPESAFE_API_KEY=jev-secret-canary\nFIREFLIES_ALLOWED_DATA_PROCESSORS=fireflies,openrouter,typesafe\n");
+  const { calls, fetchImpl } = recordingFetch();
+  await withApi({ envFile: jevEnv, fetchImpl }, async base => {
+    const r = await fetch(`${base}/api/jev/turn`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ transcript: "" }) });
+    assert.equal(r.status, 400);
+  });
+  assert.equal(calls.length, 0);
 });

@@ -53,7 +53,7 @@ function modelJsonObject(raw: string): Record<string, any> | null {
   } catch { return null; }
 }
 
-export async function fetchKeys(): Promise<{ ffKey: string; orKey: string; bridgeToken: string; providerPolicyError: string }> {
+export async function fetchKeys(): Promise<{ ffKey: string; orKey: string; bridgeToken: string; jevAvailable: boolean; providerPolicyError: string }> {
   try {
     const d = await fetch("/api/config").then(r => r.json());
     // Compatibility sentinels: App still uses truthiness to enable features,
@@ -63,11 +63,29 @@ export async function fetchKeys(): Promise<{ ffKey: string; orKey: string; bridg
       ffKey: d.firefliesAvailable ? "server" : "",
       orKey: d.openRouterAvailable ? "server" : "",
       bridgeToken: d.bridgeAvailable ? "server" : "",
+      jevAvailable: !!d.jevAvailable,
       providerPolicyError: blocked.length ? `Provider processing is locked pending explicit approval: ${blocked.join(", ")}.` : "",
     };
   } catch {
-    return { ffKey: "", orKey: "", bridgeToken: "", providerPolicyError: "" };
+    return { ffKey: "", orKey: "", bridgeToken: "", jevAvailable: false, providerPolicyError: "" };
   }
+}
+
+// Jev (TypeSafe System One) turn trigger: given the recent transcript context,
+// returns the probability the other side just handed the turn back to the
+// host, or null when Jev didn't answer (disabled, timeout, error, garbage
+// body) — the caller falls back to the existing timer, never to a guess.
+export async function fetchTurnProbability(ctx: string): Promise<number | null> {
+  try {
+    const r = await fetch("/api/jev/turn", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ transcript: ctx }),
+    });
+    if (!r.ok) return null;
+    const d = await r.json();
+    return d?.ok && typeof d.p === "number" && Number.isFinite(d.p) ? d.p : null;
+  } catch { return null; }
 }
 
 export async function fileMeeting(title: string, markdown: string, _bridgeToken: string, sessionId: string, meetingId = ""): Promise<{ ok: boolean; path?: string; error?: string }> {

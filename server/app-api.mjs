@@ -38,6 +38,12 @@ function safeModel(value) {
   return model;
 }
 
+function safeTranscript(value) {
+  const text = String(value || "");
+  if (!text) throw Object.assign(new Error("invalid transcript"), { statusCode: 400 });
+  return text.length > 8000 ? text.slice(-8000) : text;
+}
+
 function safeMessages(value) {
   if (!Array.isArray(value) || value.length === 0 || value.length > 60) throw Object.assign(new Error("invalid messages"), { statusCode: 400 });
   let bytes = 0;
@@ -101,6 +107,7 @@ export function createAppApi({
       // Secrets: environment first (oprun resolves them once at start); rotating one = restart the unit.
       fireflies: fromEnv("FIREFLY_API_KEY") || readKey(env, "FIREFLY_API_KEY"),
       openRouter: fromEnv("OPENROUTER_API") || fromEnv("OPENROUTER_API_KEY") || readKey(env, "OPENROUTER_API") || readKey(env, "OPENROUTER_API_KEY"),
+      typesafe: fromEnv("TYPESAFE_API_KEY") || readKey(env, "TYPESAFE_API_KEY"),
       appSecret: fromEnv("FIREFLIES_APP_SECRET") || readKey(env, "FIREFLIES_APP_SECRET"),
       allowedTailscaleLogins: new Set(policy("FIREFLIES_ALLOWED_TAILSCALE_LOGINS").split(",").map(value => value.trim().toLowerCase()).filter(Boolean)),
       allowedProcessors: new Set(policy("FIREFLIES_ALLOWED_DATA_PROCESSORS").split(",").map(value => value.trim().toLowerCase()).filter(Boolean)),
@@ -134,11 +141,13 @@ export function createAppApi({
       json(res, 200, {
         firefliesAvailable: !!secrets.fireflies && providerAllowed(secrets, "fireflies"),
         openRouterAvailable: !!secrets.openRouter && providerAllowed(secrets, "openrouter"),
+        jevAvailable: !!secrets.typesafe && providerAllowed(secrets, "typesafe"),
         bridgeAvailable: !!bridgeToken,
         providerPolicyConfigured: secrets.allowedProcessors.size > 0,
         blockedProviders: [
           ...(secrets.fireflies && !providerAllowed(secrets, "fireflies") ? ["fireflies"] : []),
           ...(secrets.openRouter && !providerAllowed(secrets, "openrouter") ? ["openrouter"] : []),
+          ...(secrets.typesafe && !providerAllowed(secrets, "typesafe") ? ["typesafe"] : []),
         ],
       });
       return;
@@ -200,6 +209,36 @@ export function createAppApi({
         signal: responseSignal(res, stream ? 120_000 : 45_000),
       });
       await pipeResponse(upstream, res, stream ? "text/event-stream" : "application/json");
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/jev/turn") {
+      if (!providerAllowed(secrets, "typesafe")) { json(res, 403, { ok: false, error: "TypeSafe data processing is not approved" }); return; }
+      if (!secrets.typesafe) { json(res, 503, { ok: false, error: "TypeSafe unavailable" }); return; }
+      const body = await readJson(req);
+      const transcript = safeTranscript(body.transcript);
+      // Jev is a fast trigger, not critical infrastructure: any upstream failure
+      // (timeout, non-2xx, garbage body) degrades to { ok: false } so the caller
+      // falls back to the existing 25s timer instead of erroring the app.
+      try {
+        const upstream = await fetchImpl("https://api.typesafe.ai/v1/systemone", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${secrets.typesafe}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            state: transcript,
+            model: "jev-latest",
+            questions: { turn_to_host: { type: "noul", instructions: "Did the other side just hand the turn to the host — a direct question, a request, or a pause expecting a reply?" } },
+          }),
+          signal: responseSignal(res, 4_000),
+        });
+        if (!upstream.ok) { json(res, 200, { ok: false }); return; }
+        const data = await upstream.json().catch(() => null);
+        const p = data?.answers?.turn_to_host?.noul;
+        if (typeof p !== "number" || !Number.isFinite(p)) { json(res, 200, { ok: false }); return; }
+        json(res, 200, { ok: true, p: Math.max(0, Math.min(1, p)) });
+      } catch {
+        json(res, 200, { ok: false });
+      }
       return;
     }
 
@@ -276,4 +315,4 @@ export function createAppApi({
   };
 }
 
-export const __test = { readKey, safeModel, safeMessages };
+export const __test = { readKey, safeModel, safeMessages, safeTranscript };
