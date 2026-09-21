@@ -625,6 +625,11 @@ export default function App() {
     navSeqRef.current++; feedSeqRef.current++; sentimentSeqRef.current++;
     setNavBusy(false); lastNavRef.current = 0; lastSentimentRef.current = 0; lastFeedRef.current = 0; lastAnswerRef.current = 0; sidRef.current = 1;
     lastJevCallRef.current = 0; jevLastLineIdRef.current = "";
+    // A live-answer effort (a stream, or a Jev consult awaiting its response) is
+    // scoped to ONE conversation same as everything above — bump the sequence
+    // here too, not only on Reset, so a slow answer from the meeting just left
+    // can never land its draft in the one just connected to.
+    answerSeqRef.current++; answerAbortRef.current?.abort(); answerAbortRef.current = null; setAnswering(false);
     liveAnswerRef.current = ""; scriptWordsRef.current = []; consumedTranscriptWordsRef.current.clear(); scriptPointerRef.current = 0; missStreakRef.current = 0;
     setScriptPointer(prev => prev === 0 ? prev : 0); setMissStreak(prev => prev === 0 ? prev : 0);
     lastSpeakerRef.current = ""; lineCounter.current = 0;
@@ -638,7 +643,6 @@ export default function App() {
     if (lines.length > 0) void discardInterruptedMeeting(recordSessionRef.current);
     connRef.current?.disconnect();
     clearMeetingState();
-    answerSeqRef.current++; answerAbortRef.current?.abort(); answerAbortRef.current = null; setAnswering(false);
     piAbortRef.current?.abort(); piAbortRef.current = null;
     setMessages([GREETING_CHAT]); setPiMessages([GREETING_PI]); setThinking(false); setPiThinking(false);
     setSelectedMeeting(null); setConstellation(null); setCounterpartInput(""); setTopicInput(""); setGoal("");
