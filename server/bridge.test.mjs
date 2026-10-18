@@ -296,7 +296,7 @@ test("/pi passes CLAUDE_CODE_OAUTH_TOKEN to claude; /run does not", async () => 
   await writeFile(fake, '#!/bin/sh\necho "PI_TOKEN_LEN=${#CLAUDE_CODE_OAUTH_TOKEN}"\n', { mode: 0o755 });
   const port3 = PORT + 2;
   const c3 = spawn("node", ["server/bridge.mjs"], {
-    env: { ...process.env, PATH: `${binDir}:${process.env.PATH}`, CLAUDE_CODE_OAUTH_TOKEN: "sk-test-12345", BRIDGE_TOKEN: TOKEN, BRIDGE_PORT: String(port3), BRIDGE_FILE_DIR: fileDir, BRIDGE_CLIENTS_ROOT: clientsDir, BRIDGE_AUDIT_FILE: path.join(fileDir, "pi-env-audit.log") },
+    env: { ...process.env, PATH: `${binDir}:${process.env.PATH}`, CLAUDE_CODE_OAUTH_TOKEN: "sk-test-12345", BRIDGE_WORKSPACE: binDir, BRIDGE_TOKEN: TOKEN, BRIDGE_PORT: String(port3), BRIDGE_FILE_DIR: fileDir, BRIDGE_CLIENTS_ROOT: clientsDir, BRIDGE_AUDIT_FILE: path.join(fileDir, "pi-env-audit.log") },
     stdio: "ignore",
   });
   try {
