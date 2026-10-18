@@ -106,6 +106,8 @@ const PI_ENV_KEYS = [
   "GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "ANTHROPIC_API_KEY",
   "OPENAI_API_KEY", "OPENROUTER_API_KEY", "OPENROUTER_API", "DEEPSEEK_API_KEY",
   "MINIMAX_API_KEY", "XAI_API_KEY", "MISTRAL_API_KEY", "GROQ_API_KEY", "PI_API_KEY", "PI_OFFLINE",
+  // Claude Code subscription token (key A) so `claude -p` authenticates without ~/.claude credentials.
+  "CLAUDE_CODE_OAUTH_TOKEN",
 ];
 function piEnv() {
   const env = childEnv();

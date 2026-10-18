@@ -287,3 +287,30 @@ test("/context without token -> 401", async () => {
   const r = await fetch(base + "/context", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ goal: "x" }) });
   assert.equal(r.status, 401);
 });
+
+// ---- /pi auth token pass-through -------------------------------------------
+
+test("/pi passes CLAUDE_CODE_OAUTH_TOKEN to claude; /run does not", async () => {
+  const binDir = await mkdtemp(path.join(tmpdir(), "bridge-fakeclaude-"));
+  const fake = path.join(binDir, "claude");
+  await writeFile(fake, '#!/bin/sh\necho "PI_TOKEN_LEN=${#CLAUDE_CODE_OAUTH_TOKEN}"\n', { mode: 0o755 });
+  const port3 = PORT + 2;
+  const c3 = spawn("node", ["server/bridge.mjs"], {
+    env: { ...process.env, PATH: `${binDir}:${process.env.PATH}`, CLAUDE_CODE_OAUTH_TOKEN: "sk-test-12345", BRIDGE_TOKEN: TOKEN, BRIDGE_PORT: String(port3), BRIDGE_FILE_DIR: fileDir, BRIDGE_CLIENTS_ROOT: clientsDir, BRIDGE_AUDIT_FILE: path.join(fileDir, "pi-env-audit.log") },
+    stdio: "ignore",
+  });
+  try {
+    let ready = false;
+    for (let i = 0; i < 50 && !ready; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      try { ready = (await fetch(`http://127.0.0.1:${port3}/health`)).ok; } catch {}
+    }
+    assert.ok(ready, "pi-env bridge did not boot");
+    const out = async (url, body) => (await ndjson(await fetch(url, { method: "POST", headers: auth, body: JSON.stringify(body) })))
+      .map((e) => e.data || "").join("");
+    const pi = await out(`http://127.0.0.1:${port3}/pi`, { message: "hi", sessionId: "pienv" });
+    assert.match(pi, /PI_TOKEN_LEN=13/, "/pi must forward the token to claude");
+    const run = await out(`http://127.0.0.1:${port3}/run`, { cmd: 'echo "RUN_TOKEN_LEN=${#CLAUDE_CODE_OAUTH_TOKEN}"' });
+    assert.match(run, /RUN_TOKEN_LEN=0/, "/run must not see the token");
+  } finally { c3.kill("SIGKILL"); await rm(binDir, { recursive: true, force: true }); }
+});
