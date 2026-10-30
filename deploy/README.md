@@ -5,7 +5,7 @@ Two files for Thrivbe-1. Neither holds a secret value.
 | File | Goes to | What it does |
 |---|---|---|
 | `op.env` | `/etc/fireflies-live/op.env` (root:root 0600) | Three `op://` addresses: `FIREFLY_API_KEY`, `OPENROUTER_API_KEY`, `FIREFLIES_APP_SECRET` |
-| `fireflies-live.service.d/zz-1password.conf` | `/etc/systemd/system/fireflies-live.service.d/` | Starts `serve.mjs` through `oprun --env-file /etc/fireflies-live/op.env` |
+| `fireflies-live.service.d/zz-1password.conf` | `/etc/systemd/system/fireflies-live.service.d/` | Starts `serve.mjs` through `oprun --env-file /etc/fireflies-live/op.env` and preloads server tracing |
 
 How it behaves:
 
@@ -14,6 +14,7 @@ How it behaves:
 - **The bridge child** never gets the three secrets. `serve.mjs` strips them from its environment, because the bridge forwards `OPENROUTER_*` to its `/pi` child.
 - **Other keys:** only these three go through oprun, so the other workspace keys stay out of this process.
 - **Before the drop-in:** the code does nothing new. With no oprun and a plaintext file, it behaves as it does today.
+- **Sentry tracing:** the drop-in starts the server with `/usr/bin/node --import ./server/instrument.mjs server/serve.mjs`. The bridge still starts with plain `node`, and its environment strips `NODE_OPTIONS`, so it cannot inherit the preloader. The drop-in is installed by hand, so merging this change alone does not change the live unit.
 
 What changes for Robin:
 
