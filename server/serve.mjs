@@ -43,8 +43,9 @@ export function safeDistPath(urlPath, dist = DIST) {
 
 // Provider credentials stay in this process. Under oprun they sit in process.env,
 // and the bridge (which forwards OPENROUTER_* to its /pi child) must not inherit
-// them — it only needs BRIDGE_*. Returns a new object; the input is not touched.
-export const SERVER_ONLY_ENV = new Set(["FIREFLY_API_KEY", "OPENROUTER_API", "OPENROUTER_API_KEY", "FIREFLIES_APP_SECRET"]);
+// them — it only needs BRIDGE_*. NODE_OPTIONS is also stripped so a server
+// preloader can never reach the bridge child. Returns a new object; the input is not touched.
+export const SERVER_ONLY_ENV = new Set(["FIREFLY_API_KEY", "OPENROUTER_API", "OPENROUTER_API_KEY", "FIREFLIES_APP_SECRET", "NODE_OPTIONS"]);
 export function bridgeEnv(env, bridgeToken) {
   const kept = Object.entries(env).filter(([name]) => !SERVER_ONLY_ENV.has(name));
   return { ...Object.fromEntries(kept), BRIDGE_TOKEN: bridgeToken };

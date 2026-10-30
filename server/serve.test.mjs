@@ -30,7 +30,7 @@ test("static paths stay inside dist", () => {
 
 test("provider secrets resolved by oprun never reach the bridge child's environment", () => {
   const env = {
-    PATH: "/usr/bin", HOME: "/root", BRIDGE_FILE_DIR: "/srv/transcripts", BRIDGE_TOKEN: "stale",
+    PATH: "/usr/bin", HOME: "/root", BRIDGE_FILE_DIR: "/srv/transcripts", BRIDGE_TOKEN: "stale", NODE_OPTIONS: "--import ./server/instrument.mjs",
     FIREFLY_API_KEY: "ff-canary", OPENROUTER_API: "or-canary-1", OPENROUTER_API_KEY: "or-canary-2", FIREFLIES_APP_SECRET: "app-canary",
   };
   assert.deepEqual(bridgeEnv(env, "boot-token"), { PATH: "/usr/bin", HOME: "/root", BRIDGE_FILE_DIR: "/srv/transcripts", BRIDGE_TOKEN: "boot-token" });
